@@ -1,0 +1,75 @@
+name: Enola Architecture Check
+description: Catch architectural regressions introduced by a pull request
+author: enola-labs
+branding:
+  icon: git-pull-request
+  color: purple
+
+inputs:
+  version:
+    description: Enola release version, or latest
+    default: latest
+  config:
+    description: Optional repository-relative mcp-arch.yaml path
+    required: false
+  fail-on:
+    description: Comma-separated explainer names whose new findings fail
+    required: false
+  min-confidence:
+    description: Confidence floor within failing explainers
+    required: false
+  warn-only:
+    description: Report regressions without failing the job
+    default: "false"
+  focus:
+    description: Narrow the delta to this module, file, or symbol
+    required: false
+  detail:
+    description: Include the complete structural delta in the summary
+    default: "false"
+  target:
+    description: Symbol, type, or package intended to change
+    required: false
+  expected:
+    description: Additional expected packages, comma separated
+    required: false
+  max-spillover:
+    description: Fail when spillover exceeds this count
+    required: false
+  base-sha:
+    description: Explicit base commit override
+    required: false
+  annotations:
+    description: Emit source annotations
+    default: "true"
+  summary:
+    description: Write the GitHub job summary
+    default: "true"
+  working-directory:
+    description: Repository-relative project directory
+    default: "."
+  token:
+    description: GitHub token used only to fetch a missing base commit
+    default: ${{ github.token }}
+
+outputs:
+  status:
+    description: clean, regression, usage_error, or incomparable
+  regressions:
+    description: Number of failing findings
+  advisories:
+    description: Number of advisory findings
+  facts-added:
+    description: Facts added by the change
+  facts-removed:
+    description: Facts removed by the change
+  edges-added:
+    description: Edges added by the change
+  edges-removed:
+    description: Edges removed by the change
+  verdict-file:
+    description: Path to the complete JSON verdict
+
+runs:
+  using: node20
+  main: dist/index.js

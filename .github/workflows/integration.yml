@@ -1,0 +1,24 @@
+name: Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      enola-version:
+        description: Enola release to test
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./
+        with:
+          version: ${{ inputs.enola-version }}
+          base-sha: ${{ github.event.repository.default_branch == github.ref_name && github.event.before || github.sha }}
+          warn-only: "true"

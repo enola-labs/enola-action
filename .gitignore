@@ -1,0 +1,7 @@
+node_modules/
+coverage/
+*.log
+
+# dist/index.js is intentionally committed: GitHub Actions executes it directly.
+dist/*.map
+dist/sourcemap-register.js

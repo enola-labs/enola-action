@@ -1,0 +1,28 @@
+{
+  "name": "enola-action",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Architectural regression testing for GitHub pull requests",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/main.ts -o dist --source-map",
+    "format": "prettier --write src tests *.json *.yml *.md",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/exec": "^1.1.1",
+    "@actions/tool-cache": "^2.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vercel/ncc": "^0.38.3",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
