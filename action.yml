@@ -49,7 +49,7 @@ inputs:
     description: Repository-relative project directory
     default: "."
   token:
-    description: GitHub token used only to fetch a missing base commit
+    description: GitHub token used only to resolve the latest Enola release version
     default: ${{ github.token }}
 
 outputs:
