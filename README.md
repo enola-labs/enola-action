@@ -23,14 +23,13 @@ jobs:
 
 By default, only a newly introduced dependency cycle fails. Other findings are advisory. Enola runs entirely on the GitHub runner; source code is not uploaded by this action.
 
-Version 0.1 expects Enola's default `.enola` output directory. Support for a custom `output.dir` will be added without requiring changes to the Enola repository.
+Version 1.0 expects Enola's default `.enola` output directory. Support for a custom `output.dir` will be added without requiring changes to the Enola repository.
 
 ## Configuration
 
 ```yaml
 - uses: enola-labs/enola-action@v1
   with:
-    version: "1.4.2"
     config: mcp-arch.yaml
     fail-on: cycles,layers
     min-confidence: "0.8"
@@ -39,6 +38,8 @@ Version 0.1 expects Enola's default `.enola` output directory. Support for a cus
 ```
 
 The action requires the base commit to be available. `fetch-depth: 0` is recommended; if the exact base is missing, the action attempts to fetch that commit from `origin`.
+
+By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.3.13"`, for reproducible checks that don't change when a new Enola version ships.
 
 ## Security
 
