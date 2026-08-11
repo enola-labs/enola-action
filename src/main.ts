@@ -7,7 +7,7 @@ import { resolveRevisionContext } from "./context.js";
 import { capture } from "./exec.js";
 import { addWorktree, ensureCommit, removeWorktree } from "./git.js";
 import { checkArguments, readInputs } from "./inputs.js";
-import { installEnola } from "./install.js";
+import { installEnola, useLocalEnola } from "./install.js";
 import { writeSummary } from "./summary.js";
 import { WebhookPayload } from "./types.js";
 import { assertExitCode, parseVerdict, saveVerdict } from "./verdict.js";
@@ -26,7 +26,12 @@ export async function run(): Promise<void> {
     throw new Error("working-directory must stay inside GITHUB_WORKSPACE.");
   }
 
-  const installed = await installEnola(inputs.version, inputs.token);
+  if (inputs.binary && inputs.version !== "latest") {
+    core.warning("Both binary and version were set; binary wins and the release is not downloaded.");
+  }
+  const installed = inputs.binary
+    ? await useLocalEnola(inputs.binary, headRoot)
+    : await installEnola(inputs.version, inputs.token);
   core.info(`Using Enola ${installed.version}`);
   await ensureCommit(headRoot, revisions.baseSha);
 

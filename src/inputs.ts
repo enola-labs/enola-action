@@ -8,6 +8,7 @@ function optional(name: string): string | undefined {
 export function readInputs(): Inputs {
   return {
     version: core.getInput("version").trim() || "latest",
+    binary: optional("binary"),
     config: optional("config"),
     failOn: optional("fail-on"),
     minConfidence: optional("min-confidence"),

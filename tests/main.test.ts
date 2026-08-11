@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const core = vi.hoisted(() => ({
   info: vi.fn(),
+  warning: vi.fn(),
   setOutput: vi.fn(),
   setFailed: vi.fn(),
   summary: { addRaw: vi.fn().mockReturnThis(), write: vi.fn() },
@@ -26,7 +27,7 @@ vi.mock("../src/git.js", () => git);
 const inputsModule = vi.hoisted(() => ({ readInputs: vi.fn(), checkArguments: vi.fn(() => ["check", "--json"]) }));
 vi.mock("../src/inputs.js", () => inputsModule);
 
-const install = vi.hoisted(() => ({ installEnola: vi.fn() }));
+const install = vi.hoisted(() => ({ installEnola: vi.fn(), useLocalEnola: vi.fn() }));
 vi.mock("../src/install.js", () => install);
 
 const summaryModule = vi.hoisted(() => ({ writeSummary: vi.fn() }));
@@ -108,6 +109,27 @@ describe("run", () => {
     });
     await run();
     expect(core.setFailed).toHaveBeenCalledWith("1 architectural regression(s) introduced.");
+  });
+
+  it("grades with a locally built binary instead of downloading a release", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ binary: "/tmp/enola-ent" }));
+    install.useLocalEnola.mockResolvedValue({ path: "/tmp/enola-ent", version: "0.3.17 (local build)" });
+
+    await run();
+
+    expect(install.useLocalEnola).toHaveBeenCalledWith("/tmp/enola-ent", "/workspace");
+    expect(install.installEnola).not.toHaveBeenCalled();
+    expect(core.warning).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledWith("/tmp/enola-ent", expect.arrayContaining(["baseline", "pin"]), expect.any(String), true);
+  });
+
+  it("warns that binary wins when an explicit version is also set", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ binary: "/tmp/enola-ent", version: "0.3.16" }));
+    install.useLocalEnola.mockResolvedValue({ path: "/tmp/enola-ent", version: "local build" });
+
+    await run();
+
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("binary wins"));
   });
 
   it("rejects a working-directory that escapes the workspace", async () => {

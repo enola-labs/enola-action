@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import * as tc from "@actions/tool-cache";
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
 import { capture } from "./exec.js";
 
@@ -25,6 +25,32 @@ async function sha256(file: string): Promise<string> {
   const hash = createHash("sha256");
   hash.update(await fs.readFile(file));
   return hash.digest("hex");
+}
+
+// A locally built engine — the binary the pull request itself produces, or an enterprise
+// wrapper that is never published as an Enola release. It is graded through exactly the
+// same worktree/pin/check path as a downloaded release, so a repository that builds its
+// own engine no longer has to reimplement this workflow in shell.
+//
+// The caller supplies the executable, so there is nothing to verify a checksum against;
+// the trust boundary is the workflow that built it. Everything else is identical.
+export async function useLocalEnola(binary: string, workspace: string): Promise<{ path: string; version: string }> {
+  const resolved = path.isAbsolute(binary) ? binary : path.resolve(workspace, binary);
+  try {
+    await fs.access(resolved, fsConstants.X_OK);
+  } catch {
+    throw new Error(`The binary input does not point at an executable file: ${resolved}`);
+  }
+
+  // Report the version the way the download path does, so the job summary states which
+  // engine produced the verdict rather than leaving "local" to stand for anything.
+  // --version writes to stderr in Enola and the enterprise wrapper does not implement
+  // --json, so both streams are searched and an unparsable banner is not fatal.
+  const check = await capture(resolved, ["--version"], workspace, true);
+  if (check.exitCode !== 0) throw new Error(`The binary input could not start: ${check.stderr.trim() || check.stdout.trim()}`);
+  const banner = `${check.stdout} ${check.stderr}`.trim();
+  const parsed = /version\s+(\S+)/i.exec(banner)?.[1];
+  return { path: resolved, version: parsed ? `${parsed} (local build)` : "local build" };
 }
 
 export async function installEnola(requested: string, token?: string): Promise<{ path: string; version: string }> {

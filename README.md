@@ -41,6 +41,20 @@ The action requires the base commit to be available. `fetch-depth: 0` is recomme
 
 By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.3.13"`, for reproducible checks that don't change when a new Enola version ships.
 
+## Grading with your own build
+
+Set `binary` to grade with an engine the workflow builds itself, instead of a published release. Both sides of the comparison use that one executable, so the base and the head stay comparable.
+
+```yaml
+- run: go build -o /tmp/enola ./cmd/enola
+- uses: enola-labs/enola-action@v1
+  with:
+    binary: /tmp/enola
+    warn-only: "true"
+```
+
+This is what a repository that develops Enola, or ships a wrapper around it, needs: a change to what gets extracted or explained exists only in that build, so a released binary cannot see it. Relative paths resolve against the workspace, `version` is ignored, and no checksum is verified — the trust boundary is the workflow that produced the binary.
+
 ## Security
 
 The action requires only `contents: read`, does not execute repository scripts, verifies the checksum of the downloaded Enola release, and stores its temporary base worktree under `RUNNER_TEMP`. Avoid `pull_request_target`; ordinary `pull_request` events work for forks without a write token.
