@@ -45,6 +45,7 @@ export interface Verdict {
 
 export interface Inputs {
   version: string;
+  binary?: string;
   config?: string;
   failOn?: string;
   minConfidence?: string;

@@ -17,13 +17,14 @@ const fsMock = vi.hoisted(() => ({
   mkdtemp: vi.fn(),
   copyFile: vi.fn(),
   chmod: vi.fn(),
+  access: vi.fn(),
 }));
-vi.mock("node:fs", () => ({ promises: fsMock }));
+vi.mock("node:fs", () => ({ promises: fsMock, constants: { X_OK: 1 } }));
 
 const capture = vi.hoisted(() => vi.fn());
 vi.mock("../src/exec.js", () => ({ capture }));
 
-import { installEnola } from "../src/install.js";
+import { installEnola, useLocalEnola } from "../src/install.js";
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => {
@@ -94,5 +95,51 @@ describe("installEnola", () => {
     capture.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "exec format error" });
 
     await expect(installEnola("1.0.0")).rejects.toThrow("Installed Enola could not start: exec format error");
+  });
+});
+
+describe("useLocalEnola", () => {
+  it("uses an absolute path unchanged and never contacts the network", async () => {
+    fsMock.access.mockResolvedValue(undefined);
+    capture.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "enola version 0.3.17-dev\n" });
+
+    const result = await useLocalEnola("/tmp/enola-ent", "/workspace");
+
+    expect(result.path).toBe("/tmp/enola-ent");
+    expect(result.version).toBe("0.3.17-dev (local build)");
+    expect(tc.downloadTool).not.toHaveBeenCalled();
+  });
+
+  it("resolves a relative path against the workspace", async () => {
+    fsMock.access.mockResolvedValue(undefined);
+    capture.mockResolvedValue({ exitCode: 0, stdout: "enola version 1.0.0", stderr: "" });
+
+    const result = await useLocalEnola("build/enola", "/workspace");
+
+    expect(result.path).toBe("/workspace/build/enola");
+  });
+
+  // The enterprise wrapper prints its own banner, so an unrecognised one must still grade.
+  it("falls back to a plain label when the banner carries no version", async () => {
+    fsMock.access.mockResolvedValue(undefined);
+    capture.mockResolvedValue({ exitCode: 0, stdout: "enola-ent", stderr: "" });
+
+    expect((await useLocalEnola("/tmp/enola-ent", "/workspace")).version).toBe("local build");
+  });
+
+  it("refuses a path that is not executable", async () => {
+    fsMock.access.mockRejectedValue(new Error("EACCES"));
+    await expect(useLocalEnola("/tmp/enola-ent", "/workspace")).rejects.toThrow(
+      "The binary input does not point at an executable file: /tmp/enola-ent",
+    );
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it("refuses a binary that cannot start", async () => {
+    fsMock.access.mockResolvedValue(undefined);
+    capture.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "exec format error" });
+    await expect(useLocalEnola("/tmp/enola-ent", "/workspace")).rejects.toThrow(
+      "The binary input could not start: exec format error",
+    );
   });
 });

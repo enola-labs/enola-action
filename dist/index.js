@@ -34363,6 +34363,7 @@ function optional(name) {
 function readInputs() {
     return {
         version: core.getInput("version").trim() || "latest",
+        binary: optional("binary"),
         config: optional("config"),
         failOn: optional("fail-on"),
         minConfidence: optional("min-confidence"),
@@ -34447,6 +34448,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.useLocalEnola = useLocalEnola;
 exports.installEnola = installEnola;
 const core = __importStar(__nccwpck_require__(7484));
 const tc = __importStar(__nccwpck_require__(3472));
@@ -34475,6 +34477,32 @@ async function sha256(file) {
     const hash = (0, node_crypto_1.createHash)("sha256");
     hash.update(await node_fs_1.promises.readFile(file));
     return hash.digest("hex");
+}
+// A locally built engine — the binary the pull request itself produces, or an enterprise
+// wrapper that is never published as an Enola release. It is graded through exactly the
+// same worktree/pin/check path as a downloaded release, so a repository that builds its
+// own engine no longer has to reimplement this workflow in shell.
+//
+// The caller supplies the executable, so there is nothing to verify a checksum against;
+// the trust boundary is the workflow that built it. Everything else is identical.
+async function useLocalEnola(binary, workspace) {
+    const resolved = node_path_1.default.isAbsolute(binary) ? binary : node_path_1.default.resolve(workspace, binary);
+    try {
+        await node_fs_1.promises.access(resolved, node_fs_1.constants.X_OK);
+    }
+    catch {
+        throw new Error(`The binary input does not point at an executable file: ${resolved}`);
+    }
+    // Report the version the way the download path does, so the job summary states which
+    // engine produced the verdict rather than leaving "local" to stand for anything.
+    // --version writes to stderr in Enola and the enterprise wrapper does not implement
+    // --json, so both streams are searched and an unparsable banner is not fatal.
+    const check = await (0, exec_js_1.capture)(resolved, ["--version"], workspace, true);
+    if (check.exitCode !== 0)
+        throw new Error(`The binary input could not start: ${check.stderr.trim() || check.stdout.trim()}`);
+    const banner = `${check.stdout} ${check.stderr}`.trim();
+    const parsed = /version\s+(\S+)/i.exec(banner)?.[1];
+    return { path: resolved, version: parsed ? `${parsed} (local build)` : "local build" };
 }
 async function installEnola(requested, token) {
     const version = requested === "latest" ? await latestVersion(token) : requested.replace(/^v/, "");
@@ -34577,7 +34605,12 @@ async function run() {
     if (!headDirectory.startsWith(`${headRoot}${node_path_1.default.sep}`) && headDirectory !== headRoot) {
         throw new Error("working-directory must stay inside GITHUB_WORKSPACE.");
     }
-    const installed = await (0, install_js_1.installEnola)(inputs.version, inputs.token);
+    if (inputs.binary && inputs.version !== "latest") {
+        core.warning("Both binary and version were set; binary wins and the release is not downloaded.");
+    }
+    const installed = inputs.binary
+        ? await (0, install_js_1.useLocalEnola)(inputs.binary, headRoot)
+        : await (0, install_js_1.installEnola)(inputs.version, inputs.token);
     core.info(`Using Enola ${installed.version}`);
     await (0, git_js_1.ensureCommit)(headRoot, revisions.baseSha);
     const temporaryRoot = await node_fs_1.promises.mkdtemp(node_path_1.default.join(process.env.RUNNER_TEMP || node_os_1.default.tmpdir(), "enola-action-"));

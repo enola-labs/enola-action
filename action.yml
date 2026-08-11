@@ -9,6 +9,11 @@ inputs:
   version:
     description: Enola release version, or latest
     default: latest
+  binary:
+    description: >-
+      Path to an Enola-compatible executable to grade with, instead of downloading a
+      release. Relative paths resolve against the workspace. Takes precedence over version.
+    required: false
   config:
     description: Optional repository-relative mcp-arch.yaml path
     required: false
