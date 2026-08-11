@@ -21,6 +21,10 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: git diff --exit-code -- dist/index.js
+      # A committed bundle that cannot be loaded is the one failure that reaches every
+      # consumer at once, so the tag is verified the way a runner loads it.
+      - name: Bundle loads standalone
+        run: NODE_ENV=test node dist/index.js
 
   major-tag:
     needs: verify

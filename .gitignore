@@ -3,5 +3,7 @@ coverage/
 *.log
 
 # dist/index.js is intentionally committed: GitHub Actions executes it directly.
+# The bundle is therefore built WITHOUT --source-map. ncc's sourcemap build emits a
+# `require('./sourcemap-register.js')` prologue, and ignoring that file here shipped a
+# bundle that could not load at all (MODULE_NOT_FOUND on every consumer's runner).
 dist/*.map
-dist/sourcemap-register.js
