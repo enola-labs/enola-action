@@ -34647,6 +34647,7 @@ async function run() {
         core.setOutput("edges-added", verdict.edges_added);
         core.setOutput("edges-removed", verdict.edges_removed);
         core.setOutput("verdict-file", verdictFile);
+        (0, summary_js_1.logVerdict)(verdict);
         if (inputs.annotations)
             (0, annotations_js_1.annotate)(verdict);
         if (inputs.summary)
@@ -34709,6 +34710,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.logVerdict = logVerdict;
 exports.writeSummary = writeSummary;
 const core = __importStar(__nccwpck_require__(7484));
 function short(sha) {
@@ -34722,6 +34724,25 @@ function findingList(findings) {
         return `- **${finding.source || "architecture"} · ${finding.confidence.toFixed(2)}** — ${finding.title}${place}`;
     })
         .join("\n");
+}
+// The step log, not the job summary. A gate whose successful run prints nothing reads as
+// a gate that did not run — the verdict has to be visible where the work appears to happen.
+function logVerdict(verdict) {
+    const failures = verdict.failures || [];
+    const advisories = verdict.advisories || [];
+    core.info(`Verdict: ${verdict.status} — ${failures.length} regression(s), ${advisories.length} advisory, ` +
+        `${(verdict.resolved || []).length} resolved`);
+    core.info(`Delta: facts +${verdict.facts_added}/-${verdict.facts_removed}, ` +
+        `edges +${verdict.edges_added}/-${verdict.edges_removed}`);
+    for (const warning of verdict.comparability_warnings || [])
+        core.warning(warning);
+    for (const [label, findings] of [["Regression", failures], ["Advisory", advisories]]) {
+        for (const finding of findings) {
+            const at = finding.location || finding.evidence?.find((item) => item.file);
+            const place = at?.file ? ` (${at.file}${"line" in at && at.line ? `:${at.line}` : ""})` : "";
+            core.info(`  ${label}: ${finding.source || "architecture"} · ${finding.confidence.toFixed(2)} — ${finding.title}${place}`);
+        }
+    }
 }
 async function writeSummary(verdict, baseSha, headSha, version) {
     const failures = verdict.failures || [];

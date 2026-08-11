@@ -8,7 +8,7 @@ import { capture } from "./exec.js";
 import { addWorktree, ensureCommit, removeWorktree } from "./git.js";
 import { checkArguments, readInputs } from "./inputs.js";
 import { installEnola, useLocalEnola } from "./install.js";
-import { writeSummary } from "./summary.js";
+import { logVerdict, writeSummary } from "./summary.js";
 import { WebhookPayload } from "./types.js";
 import { assertExitCode, parseVerdict, saveVerdict } from "./verdict.js";
 
@@ -69,6 +69,7 @@ export async function run(): Promise<void> {
     core.setOutput("edges-removed", verdict.edges_removed);
     core.setOutput("verdict-file", verdictFile);
 
+    logVerdict(verdict);
     if (inputs.annotations) annotate(verdict);
     if (inputs.summary) await writeSummary(verdict, revisions.baseSha, revisions.headSha, installed.version);
 

@@ -15,6 +15,29 @@ function findingList(findings: Finding[]): string {
     .join("\n");
 }
 
+// The step log, not the job summary. A gate whose successful run prints nothing reads as
+// a gate that did not run — the verdict has to be visible where the work appears to happen.
+export function logVerdict(verdict: Verdict): void {
+  const failures = verdict.failures || [];
+  const advisories = verdict.advisories || [];
+  core.info(
+    `Verdict: ${verdict.status} — ${failures.length} regression(s), ${advisories.length} advisory, ` +
+      `${(verdict.resolved || []).length} resolved`,
+  );
+  core.info(
+    `Delta: facts +${verdict.facts_added}/-${verdict.facts_removed}, ` +
+      `edges +${verdict.edges_added}/-${verdict.edges_removed}`,
+  );
+  for (const warning of verdict.comparability_warnings || []) core.warning(warning);
+  for (const [label, findings] of [["Regression", failures], ["Advisory", advisories]] as const) {
+    for (const finding of findings) {
+      const at = finding.location || finding.evidence?.find((item) => item.file);
+      const place = at?.file ? ` (${at.file}${"line" in at && at.line ? `:${at.line}` : ""})` : "";
+      core.info(`  ${label}: ${finding.source || "architecture"} · ${finding.confidence.toFixed(2)} — ${finding.title}${place}`);
+    }
+  }
+}
+
 export async function writeSummary(verdict: Verdict, baseSha: string, headSha: string, version: string): Promise<void> {
   const failures = verdict.failures || [];
   const advisories = verdict.advisories || [];

@@ -30,7 +30,7 @@ vi.mock("../src/inputs.js", () => inputsModule);
 const install = vi.hoisted(() => ({ installEnola: vi.fn(), useLocalEnola: vi.fn() }));
 vi.mock("../src/install.js", () => install);
 
-const summaryModule = vi.hoisted(() => ({ writeSummary: vi.fn() }));
+const summaryModule = vi.hoisted(() => ({ writeSummary: vi.fn(), logVerdict: vi.fn() }));
 vi.mock("../src/summary.js", () => summaryModule);
 
 const verdictModule = vi.hoisted(() => ({ parseVerdict: vi.fn(), assertExitCode: vi.fn(), saveVerdict: vi.fn() }));
@@ -95,6 +95,11 @@ describe("run", () => {
     expect(core.setFailed).not.toHaveBeenCalled();
     expect(core.setOutput).toHaveBeenCalledWith("status", "clean");
     expect(git.removeWorktree).toHaveBeenCalled();
+  });
+
+  it("logs the verdict to the step log even when nothing is wrong", async () => {
+    await run();
+    expect(summaryModule.logVerdict).toHaveBeenCalledWith(expect.objectContaining({ status: "clean" }));
   });
 
   it("fails the job on a regression verdict", async () => {
