@@ -23,6 +23,20 @@ export interface Finding {
   evidence?: Evidence[];
 }
 
+// A count the policy can gate on that no finding carries — spillover packages, today.
+// A fatal breach makes the status a regression exactly as a failing finding does, which
+// is why anything that counts regressions has to count these too.
+export interface Measurement {
+  name: string;
+  label: string;
+  count: number;
+}
+
+export interface Breach {
+  measurement: Measurement;
+  fatal?: boolean;
+}
+
 export interface Verdict {
   schema_version?: number;
   tool?: { name: string; version: string };
@@ -30,6 +44,8 @@ export interface Verdict {
   failures?: Finding[];
   advisories?: Finding[];
   resolved?: Finding[];
+  measurements?: Measurement[];
+  breaches?: Breach[];
   comparability_warnings?: string[];
   blocking_kinds?: string[];
   edges_added: number;

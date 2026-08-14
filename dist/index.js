@@ -34640,7 +34640,7 @@ async function run() {
         (0, verdict_js_1.assertExitCode)(verdict, result.exitCode);
         await (0, verdict_js_1.saveVerdict)(verdictFile, result.stdout);
         core.setOutput("status", verdict.status);
-        core.setOutput("regressions", (verdict.failures || []).length);
+        core.setOutput("regressions", (0, verdict_js_1.regressionCount)(verdict));
         core.setOutput("advisories", (verdict.advisories || []).length);
         core.setOutput("facts-added", verdict.facts_added);
         core.setOutput("facts-removed", verdict.facts_removed);
@@ -34654,7 +34654,7 @@ async function run() {
             await (0, summary_js_1.writeSummary)(verdict, revisions.baseSha, revisions.headSha, installed.version);
         if (verdict.status !== "clean") {
             core.setFailed(verdict.status === "regression"
-                ? `${(verdict.failures || []).length} architectural regression(s) introduced.`
+                ? `${(0, verdict_js_1.regressionCount)(verdict)} architectural regression(s) introduced.`
                 : verdict.status === "incomparable"
                     ? "Enola refused to grade incomparable snapshots."
                     : "Enola could not complete the architecture check.");
@@ -34713,8 +34713,14 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.logVerdict = logVerdict;
 exports.writeSummary = writeSummary;
 const core = __importStar(__nccwpck_require__(7484));
+const verdict_js_1 = __nccwpck_require__(3138);
 function short(sha) {
     return sha.slice(0, 8);
+}
+function breachList(breaches) {
+    return breaches
+        .map((breach) => `- **${breach.fatal ? "fail" : "warn"}** — ${breach.measurement.count} ${breach.measurement.label}`)
+        .join("\n");
 }
 function findingList(findings) {
     return findings
@@ -34730,8 +34736,15 @@ function findingList(findings) {
 function logVerdict(verdict) {
     const failures = verdict.failures || [];
     const advisories = verdict.advisories || [];
-    core.info(`Verdict: ${verdict.status} — ${failures.length} regression(s), ${advisories.length} advisory, ` +
+    core.info(`Verdict: ${verdict.status} — ${(0, verdict_js_1.regressionCount)(verdict)} regression(s), ${advisories.length} advisory, ` +
         `${(verdict.resolved || []).length} resolved`);
+    for (const breach of verdict.breaches || []) {
+        const line = `${breach.measurement.count} ${breach.measurement.label}`;
+        if (breach.fatal)
+            core.info(`  Regression: ${line} (over threshold)`);
+        else
+            core.info(`  Warning: ${line} (over threshold)`);
+    }
     core.info(`Delta: facts +${verdict.facts_added}/-${verdict.facts_removed}, ` +
         `edges +${verdict.edges_added}/-${verdict.edges_removed}`);
     for (const warning of verdict.comparability_warnings || [])
@@ -34747,16 +34760,24 @@ function logVerdict(verdict) {
 async function writeSummary(verdict, baseSha, headSha, version) {
     const failures = verdict.failures || [];
     const advisories = verdict.advisories || [];
+    const breaches = verdict.breaches || [];
+    // Counts breaches, not just findings: a spillover-only failure has no failing finding,
+    // and "0 structural regression(s) introduced" over a red job is worse than no summary.
+    const regressions = (0, verdict_js_1.regressionCount)(verdict);
     const icon = verdict.status === "clean" ? "✅" : verdict.status === "regression" ? "❌" : "⚠️";
     const title = verdict.status === "clean"
-        ? failures.length ? `${failures.length} regression(s) reported in warn-only mode` : "No structural regression"
-        : verdict.status === "regression" ? `${failures.length} structural regression(s) introduced`
+        ? regressions ? `${regressions} regression(s) reported in warn-only mode` : "No structural regression"
+        : verdict.status === "regression" ? `${regressions} structural regression(s) introduced`
             : verdict.status === "incomparable" ? "Enola refused to grade incomparable snapshots"
                 : "Enola could not complete the architecture check";
     let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
     markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
     if (failures.length)
         markdown += `## Regressions\n\n${findingList(failures)}\n\n`;
+    // Ahead of advisories: a fatal breach is why the job is red, and it must not sit below
+    // findings that did not fail it.
+    if (breaches.length)
+        markdown += `## Measurements over threshold\n\n${breachList(breaches)}\n\n`;
     if (advisories.length)
         markdown += `## Advisory findings\n\n${findingList(advisories)}\n\n`;
     if (verdict.comparability_warnings?.length) {
@@ -34779,6 +34800,8 @@ async function writeSummary(verdict, baseSha, headSha, version) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseVerdict = parseVerdict;
+exports.fatalBreaches = fatalBreaches;
+exports.regressionCount = regressionCount;
 exports.assertExitCode = assertExitCode;
 exports.saveVerdict = saveVerdict;
 const node_fs_1 = __nccwpck_require__(3024);
@@ -34807,6 +34830,19 @@ function parseVerdict(raw) {
             throw new Error(`Enola verdict is missing numeric ${key}.`);
     }
     return verdict;
+}
+function fatalBreaches(verdict) {
+    return (verdict.breaches || []).filter((breach) => breach.fatal);
+}
+// What the job should call "a regression", counted in ONE place.
+//
+// A change can be a regression with zero failing findings: `max-spillover` gates on a
+// measurement rather than a finding, and Enola marks that breach fatal. Counting only
+// `failures` produced a job that failed with the summary "0 structural regression(s)
+// introduced" and no section saying why — the exact contradiction Enola's own renderer
+// counts breaches to avoid. Every surface that reports a count reads this.
+function regressionCount(verdict) {
+    return (verdict.failures || []).length + fatalBreaches(verdict).length;
 }
 function assertExitCode(verdict, exitCode) {
     const expected = exitCodes[verdict.status];

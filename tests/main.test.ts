@@ -34,7 +34,13 @@ const summaryModule = vi.hoisted(() => ({ writeSummary: vi.fn(), logVerdict: vi.
 vi.mock("../src/summary.js", () => summaryModule);
 
 const verdictModule = vi.hoisted(() => ({ parseVerdict: vi.fn(), assertExitCode: vi.fn(), saveVerdict: vi.fn() }));
-vi.mock("../src/verdict.js", () => verdictModule);
+// Only the three that touch the outside world are stubbed. regressionCount and
+// fatalBreaches are pure functions of the verdict, and re-implementing them in a mock
+// would let main.ts and the tests drift apart on the one number the job is graded by.
+vi.mock("../src/verdict.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/verdict.js")>()),
+  ...verdictModule,
+}));
 
 import { run } from "../src/main.js";
 import { Inputs } from "../src/types.js";
@@ -114,6 +120,25 @@ describe("run", () => {
     });
     await run();
     expect(core.setFailed).toHaveBeenCalledWith("1 architectural regression(s) introduced.");
+  });
+
+  // max-spillover gates on a measurement, not a finding. Counting only `failures` here
+  // told the developer "0 architectural regression(s) introduced." on a job it had just
+  // turned red, with nothing anywhere naming the reason.
+  it("counts a fatal measurement breach when no finding failed", async () => {
+    verdictModule.parseVerdict.mockReturnValue({
+      status: "regression",
+      failures: [],
+      advisories: [],
+      breaches: [{ measurement: { name: "spillover_packages", label: "package(s) reached outside the declared scope", count: 1 }, fatal: true }],
+      edges_added: 0,
+      edges_removed: 0,
+      facts_added: 0,
+      facts_removed: 0,
+    });
+    await run();
+    expect(core.setFailed).toHaveBeenCalledWith("1 architectural regression(s) introduced.");
+    expect(core.setOutput).toHaveBeenCalledWith("regressions", 1);
   });
 
   it("grades with a locally built binary instead of downloading a release", async () => {

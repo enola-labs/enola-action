@@ -10,7 +10,7 @@ import { checkArguments, readInputs } from "./inputs.js";
 import { installEnola, useLocalEnola } from "./install.js";
 import { logVerdict, writeSummary } from "./summary.js";
 import { WebhookPayload } from "./types.js";
-import { assertExitCode, parseVerdict, saveVerdict } from "./verdict.js";
+import { assertExitCode, parseVerdict, regressionCount, saveVerdict } from "./verdict.js";
 
 export async function run(): Promise<void> {
   const inputs = readInputs();
@@ -61,7 +61,7 @@ export async function run(): Promise<void> {
     await saveVerdict(verdictFile, result.stdout);
 
     core.setOutput("status", verdict.status);
-    core.setOutput("regressions", (verdict.failures || []).length);
+    core.setOutput("regressions", regressionCount(verdict));
     core.setOutput("advisories", (verdict.advisories || []).length);
     core.setOutput("facts-added", verdict.facts_added);
     core.setOutput("facts-removed", verdict.facts_removed);
@@ -76,7 +76,7 @@ export async function run(): Promise<void> {
     if (verdict.status !== "clean") {
       core.setFailed(
         verdict.status === "regression"
-          ? `${(verdict.failures || []).length} architectural regression(s) introduced.`
+          ? `${regressionCount(verdict)} architectural regression(s) introduced.`
           : verdict.status === "incomparable"
             ? "Enola refused to grade incomparable snapshots."
             : "Enola could not complete the architecture check.",
