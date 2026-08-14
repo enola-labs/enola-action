@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { Verdict, VerdictStatus } from "./types.js";
+import { Breach, Verdict, VerdictStatus } from "./types.js";
 
 const statuses = new Set<VerdictStatus>(["clean", "regression", "usage_error", "incomparable"]);
 const exitCodes: Record<VerdictStatus, number> = {
@@ -23,6 +23,21 @@ export function parseVerdict(raw: string): Verdict {
     if (typeof verdict[key] !== "number") throw new Error(`Enola verdict is missing numeric ${key}.`);
   }
   return verdict as Verdict;
+}
+
+export function fatalBreaches(verdict: Verdict): Breach[] {
+  return (verdict.breaches || []).filter((breach) => breach.fatal);
+}
+
+// What the job should call "a regression", counted in ONE place.
+//
+// A change can be a regression with zero failing findings: `max-spillover` gates on a
+// measurement rather than a finding, and Enola marks that breach fatal. Counting only
+// `failures` produced a job that failed with the summary "0 structural regression(s)
+// introduced" and no section saying why — the exact contradiction Enola's own renderer
+// counts breaches to avoid. Every surface that reports a count reads this.
+export function regressionCount(verdict: Verdict): number {
+  return (verdict.failures || []).length + fatalBreaches(verdict).length;
 }
 
 export function assertExitCode(verdict: Verdict, exitCode: number): void {

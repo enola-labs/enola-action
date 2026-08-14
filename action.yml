@@ -61,7 +61,9 @@ outputs:
   status:
     description: clean, regression, usage_error, or incomparable
   regressions:
-    description: Number of failing findings
+    description: >-
+      Number of failing findings plus fatal measurement breaches, i.e. everything that
+      made the job red. A max-spillover breach counts here and carries no finding.
   advisories:
     description: Number of advisory findings
   facts-added:

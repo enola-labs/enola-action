@@ -1,0 +1,68 @@
+{
+  "status": "regression",
+  "policy": {
+    "fail_explainers": [
+      "cycles"
+    ],
+    "min_confidence": 1,
+    "warn_only": false,
+    "thresholds": [
+      {
+        "measurement": "spillover_packages",
+        "fail_at": 1
+      }
+    ]
+  },
+  "advisories": [
+    {
+      "title": "Layer violation: storage -> api",
+      "source": "layers",
+      "description": "Module \"src/storage\" (layer: storage, level 0) imports module \"src/web\" (layer: api, level 2). Inner layers should not depend on outer layers.",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "src/storage/mod.rs",
+          "detail": "import of src/web"
+        },
+        {
+          "fact": "src/storage -> crate::web",
+          "detail": "import edge"
+        },
+        {
+          "fact": "src/web",
+          "detail": "import edge target"
+        },
+        {
+          "fact": "src/storage",
+          "detail": "importing module"
+        }
+      ],
+      "suggested_actions": [
+        "Introduce an interface/port in the inner layer",
+        "Move shared types to a common package",
+        "Invert the dependency using dependency injection"
+      ]
+    }
+  ],
+  "measurements": [
+    {
+      "name": "spillover_packages",
+      "label": "package(s) reached outside the declared scope",
+      "count": 1
+    }
+  ],
+  "breaches": [
+    {
+      "measurement": {
+        "name": "spillover_packages",
+        "label": "package(s) reached outside the declared scope",
+        "count": 1
+      },
+      "fatal": true
+    }
+  ],
+  "edges_added": 2,
+  "edges_removed": 0,
+  "facts_added": 1,
+  "facts_removed": 0
+}
