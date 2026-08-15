@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const capture = vi.hoisted(() => vi.fn());
-vi.mock("../src/exec.js", () => ({ capture }));
+vi.mock("../src/platform/exec.js", () => ({ capture }));
 
-import { addWorktree, ensureCommit, removeWorktree } from "../src/git.js";
+import { addWorktree, ensureCommit, removeWorktree } from "../src/platform/git.js";
 
 beforeEach(() => vi.clearAllMocks());
 

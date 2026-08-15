@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const core = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn() }));
 vi.mock("@actions/core", () => core);
 
-import { annotate } from "../src/annotations.js";
-import { Verdict } from "../src/types.js";
+import { annotate } from "../src/report/annotations.js";
+import { Verdict } from "../src/core/types.js";
 
 function verdict(overrides: Partial<Verdict>): Verdict {
   return { status: "clean", edges_added: 0, edges_removed: 0, facts_added: 0, facts_removed: 0, ...overrides };

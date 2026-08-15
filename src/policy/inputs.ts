@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import { Inputs } from "./types.js";
+import { Inputs } from "../core/types.js";
 
 function optional(name: string): string | undefined {
   return core.getInput(name).trim() || undefined;

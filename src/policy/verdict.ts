@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { Breach, Verdict, VerdictStatus } from "./types.js";
+import { Breach, Verdict, VerdictStatus } from "../core/types.js";
 
 const statuses = new Set<VerdictStatus>(["clean", "regression", "usage_error", "incomparable"]);
 const exitCodes: Record<VerdictStatus, number> = {

@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
-import { Breach, Finding, Verdict } from "./types.js";
-import { enforcesNothing, fatalBreaches, regressionCount } from "./verdict.js";
+import { Breach, Finding, Verdict } from "../core/types.js";
+import { enforcesNothing, fatalBreaches, regressionCount } from "../policy/verdict.js";
 
 function short(sha: string): string {
   return sha.slice(0, 8);

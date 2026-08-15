@@ -30,3 +30,34 @@ jobs:
       - name: Bundle loads standalone
         run: NODE_ENV=test node dist/index.js
       - run: npm audit --omit=dev
+
+  # The action, run on the action. It grades this pull request against the layer order
+  # declared in enola-intent.yaml — the same file a consumer would write, enforced the
+  # same way a consumer would enforce it.
+  #
+  # REQUIRES enola >= 0.3.21. Earlier builds grade the finding that merely NAMES a
+  # declared layer order, so this job would fail any pull request for having a
+  # declaration at all. `version: latest` picks the fix up as soon as it is released.
+  architecture:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the base commit has to be reachable to pin a baseline from it
+
+      # `uses: ./` runs the committed bundle, so it has to be current. The test job
+      # proves that separately; building here keeps this job independent of it.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - uses: ./
+        with:
+          version: latest
+          # The policy. Without it this job is a report that can never fail — which is
+          # the default enola ships, and the reason it is stated here rather than assumed.
+          fail-on: layers

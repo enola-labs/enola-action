@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import { Finding, Location, Verdict } from "./types.js";
+import { Finding, Location, Verdict } from "../core/types.js";
 
 const LIMIT = 10;
 

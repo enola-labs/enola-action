@@ -2,15 +2,15 @@ import * as core from "@actions/core";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { annotate } from "./annotations.js";
-import { resolveRevisionContext } from "./context.js";
-import { capture } from "./exec.js";
-import { addWorktree, ensureCommit, removeWorktree } from "./git.js";
-import { checkArguments, readInputs } from "./inputs.js";
-import { installEnola, useLocalEnola } from "./install.js";
-import { logVerdict, writeSummary } from "./summary.js";
-import { WebhookPayload } from "./types.js";
-import { assertExitCode, parseVerdict, regressionCount, saveVerdict } from "./verdict.js";
+import { annotate } from "./report/annotations.js";
+import { resolveRevisionContext } from "./policy/context.js";
+import { capture } from "./platform/exec.js";
+import { addWorktree, ensureCommit, removeWorktree } from "./platform/git.js";
+import { checkArguments, readInputs } from "./policy/inputs.js";
+import { installEnola, useLocalEnola } from "./platform/install.js";
+import { logVerdict, writeSummary } from "./report/summary.js";
+import { WebhookPayload } from "./core/types.js";
+import { assertExitCode, parseVerdict, regressionCount, saveVerdict } from "./policy/verdict.js";
 
 export async function run(): Promise<void> {
   const inputs = readInputs();

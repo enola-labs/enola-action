@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertExitCode, parseVerdict } from "../src/verdict.js";
+import { assertExitCode, parseVerdict } from "../src/policy/verdict.js";
 
 const clean = JSON.stringify({ status: "clean", edges_added: 0, edges_removed: 0, facts_added: 0, facts_removed: 0 });
 

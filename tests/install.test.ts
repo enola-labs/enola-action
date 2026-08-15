@@ -22,9 +22,9 @@ const fsMock = vi.hoisted(() => ({
 vi.mock("node:fs", () => ({ promises: fsMock, constants: { X_OK: 1 } }));
 
 const capture = vi.hoisted(() => vi.fn());
-vi.mock("../src/exec.js", () => ({ capture }));
+vi.mock("../src/platform/exec.js", () => ({ capture }));
 
-import { installEnola, useLocalEnola } from "../src/install.js";
+import { installEnola, useLocalEnola } from "../src/platform/install.js";
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => {

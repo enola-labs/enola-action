@@ -13,37 +13,37 @@ const fsMock = vi.hoisted(() => ({ readFile: vi.fn(), mkdtemp: vi.fn() }));
 vi.mock("node:fs", () => ({ promises: fsMock }));
 
 const annotate = vi.hoisted(() => vi.fn());
-vi.mock("../src/annotations.js", () => ({ annotate }));
+vi.mock("../src/report/annotations.js", () => ({ annotate }));
 
 const contextModule = vi.hoisted(() => ({ resolveRevisionContext: vi.fn() }));
-vi.mock("../src/context.js", () => contextModule);
+vi.mock("../src/policy/context.js", () => contextModule);
 
 const capture = vi.hoisted(() => vi.fn());
-vi.mock("../src/exec.js", () => ({ capture }));
+vi.mock("../src/platform/exec.js", () => ({ capture }));
 
 const git = vi.hoisted(() => ({ ensureCommit: vi.fn(), addWorktree: vi.fn(), removeWorktree: vi.fn() }));
-vi.mock("../src/git.js", () => git);
+vi.mock("../src/platform/git.js", () => git);
 
 const inputsModule = vi.hoisted(() => ({ readInputs: vi.fn(), checkArguments: vi.fn(() => ["check", "--json"]) }));
-vi.mock("../src/inputs.js", () => inputsModule);
+vi.mock("../src/policy/inputs.js", () => inputsModule);
 
 const install = vi.hoisted(() => ({ installEnola: vi.fn(), useLocalEnola: vi.fn() }));
-vi.mock("../src/install.js", () => install);
+vi.mock("../src/platform/install.js", () => install);
 
 const summaryModule = vi.hoisted(() => ({ writeSummary: vi.fn(), logVerdict: vi.fn() }));
-vi.mock("../src/summary.js", () => summaryModule);
+vi.mock("../src/report/summary.js", () => summaryModule);
 
 const verdictModule = vi.hoisted(() => ({ parseVerdict: vi.fn(), assertExitCode: vi.fn(), saveVerdict: vi.fn() }));
 // Only the three that touch the outside world are stubbed. regressionCount and
 // fatalBreaches are pure functions of the verdict, and re-implementing them in a mock
 // would let main.ts and the tests drift apart on the one number the job is graded by.
-vi.mock("../src/verdict.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/verdict.js")>()),
+vi.mock("../src/policy/verdict.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/policy/verdict.js")>()),
   ...verdictModule,
 }));
 
 import { run } from "../src/main.js";
-import { Inputs } from "../src/types.js";
+import { Inputs } from "../src/core/types.js";
 
 const baseEnv = {
   GITHUB_EVENT_NAME: "pull_request",

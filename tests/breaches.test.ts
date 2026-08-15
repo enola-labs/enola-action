@@ -10,9 +10,9 @@ const { write, addRaw, info } = vi.hoisted(() => {
 });
 vi.mock("@actions/core", () => ({ summary: { addRaw }, info, warning: vi.fn(), error: vi.fn() }));
 
-import { logVerdict, writeSummary } from "../src/summary.js";
-import { regressionCount } from "../src/verdict.js";
-import { Verdict } from "../src/types.js";
+import { logVerdict, writeSummary } from "../src/report/summary.js";
+import { regressionCount } from "../src/policy/verdict.js";
+import { Verdict } from "../src/core/types.js";
 
 // A real `enola check --target=… --max-spillover=0` verdict, captured from the engine
 // rather than hand-written: status regression, ZERO failing findings, one fatal breach.

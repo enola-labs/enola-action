@@ -1,0 +1,30 @@
+# This action's declared architecture — enforced by its own CI (`fail-on: layers`).
+#
+# Outermost first. A layer may depend on the ones below it and on its own peers;
+# depending upwards is the violation. Declaring the order is also what makes the verdict
+# exact: an order enola recognises for itself caps at confidence 0.80, while a declared
+# one is verdicted at 1.00, which is the floor the gate uses.
+#
+#   entry     the action itself: resolve inputs, pin the base, run the check, set the
+#             outputs. Nothing may import into it.
+#   report    what the job LEAVES BEHIND — the summary and the source annotations. It
+#             reads a verdict; nothing reads it back.
+#   policy    what the run MEANS: the inputs, the revisions to compare, and how a
+#             verdict is interpreted (regression counts, whether anything was enforced).
+#             Pure, and the layer worth keeping that way — it is where a mistake is a
+#             wrong verdict rather than a broken job.
+#   platform  the outside world: subprocesses, git, downloading a release.
+#   core      the shapes both sides agree on. Depends on nothing.
+#
+# The split is not cosmetic. `policy` deciding what a verdict means must never depend on
+# `report` rendering one, or the two drift apart on the number the job is graded by —
+# which has happened here before: a spillover-only breach was counted in one place and
+# not the other, and the summary read "0 structural regression(s) introduced" over a red
+# job. Same reason `platform` sits below `policy`: what the action DOES must not be able
+# to reach up into what the run MEANS.
+layers:
+  - {name: entry,    paths: ["src"]}
+  - {name: report,   paths: ["src/report/**"]}
+  - {name: policy,   paths: ["src/policy/**"]}
+  - {name: platform, paths: ["src/platform/**"]}
+  - {name: core,     paths: ["src/core/**"]}

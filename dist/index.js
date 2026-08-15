@@ -34119,423 +34119,6 @@ module.exports = {
 
 /***/ }),
 
-/***/ 105:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.annotate = annotate;
-const core = __importStar(__nccwpck_require__(7484));
-const LIMIT = 10;
-function location(finding) {
-    if (finding.location?.file)
-        return finding.location;
-    const evidence = finding.evidence?.find((item) => item.file);
-    return evidence?.file ? { file: evidence.file } : undefined;
-}
-function properties(finding) {
-    const at = location(finding);
-    return {
-        title: `Enola: ${finding.source || "architecture"}`,
-        file: at?.file,
-        startLine: at?.line,
-        endLine: at?.end_line || at?.line,
-    };
-}
-function message(finding) {
-    return `${finding.title} (confidence ${finding.confidence.toFixed(2)})`;
-}
-function annotate(verdict) {
-    for (const finding of (verdict.failures || []).slice(0, LIMIT)) {
-        core.error(message(finding), properties(finding));
-    }
-    for (const finding of (verdict.advisories || []).slice(0, LIMIT)) {
-        core.warning(message(finding), properties(finding));
-    }
-    if (verdict.status === "incomparable") {
-        core.error(`Enola refused to grade this change: ${(verdict.comparability_warnings || []).join("; ") || "snapshots are not comparable"}`);
-    }
-}
-
-
-/***/ }),
-
-/***/ 788:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.resolveRevisionContext = resolveRevisionContext;
-const ZERO_SHA = /^0+$/;
-function resolveRevisionContext(inputs, eventName, payload, sha) {
-    let baseSha = inputs.baseSha;
-    if (!baseSha && eventName === "pull_request") {
-        baseSha = payload.pull_request?.base?.sha;
-    }
-    else if (!baseSha && eventName === "push") {
-        baseSha = payload.before;
-    }
-    else if (!baseSha && eventName === "merge_group") {
-        baseSha = payload.merge_group?.base_sha;
-    }
-    if (!baseSha || ZERO_SHA.test(baseSha)) {
-        throw new Error(`No usable base commit for ${eventName || "this event"}. Set the base-sha input explicitly.`);
-    }
-    if (!sha)
-        throw new Error("GitHub did not provide a current commit SHA.");
-    return { baseSha, headSha: sha, eventName };
-}
-
-
-/***/ }),
-
-/***/ 3190:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.capture = capture;
-const exec = __importStar(__nccwpck_require__(5236));
-async function capture(command, args, cwd, ignoreReturnCode = false) {
-    let stdout = "";
-    let stderr = "";
-    const exitCode = await exec.exec(command, args, {
-        cwd,
-        ignoreReturnCode,
-        silent: true,
-        listeners: {
-            stdout: (data) => (stdout += data.toString()),
-            stderr: (data) => (stderr += data.toString()),
-        },
-    });
-    return { exitCode, stdout, stderr };
-}
-
-
-/***/ }),
-
-/***/ 1243:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.ensureCommit = ensureCommit;
-exports.addWorktree = addWorktree;
-exports.removeWorktree = removeWorktree;
-const exec_js_1 = __nccwpck_require__(3190);
-async function ensureCommit(repo, sha) {
-    const present = await (0, exec_js_1.capture)("git", ["cat-file", "-e", `${sha}^{commit}`], repo, true);
-    if (present.exitCode === 0)
-        return;
-    const fetched = await (0, exec_js_1.capture)("git", ["fetch", "--no-tags", "origin", sha], repo, true);
-    if (fetched.exitCode !== 0) {
-        throw new Error(`Unable to fetch base commit ${sha}: ${fetched.stderr.trim()}`);
-    }
-}
-async function addWorktree(repo, target, sha) {
-    const result = await (0, exec_js_1.capture)("git", ["worktree", "add", "--detach", target, sha], repo, true);
-    if (result.exitCode !== 0)
-        throw new Error(`Unable to create base worktree: ${result.stderr.trim()}`);
-}
-async function removeWorktree(repo, target) {
-    await (0, exec_js_1.capture)("git", ["worktree", "remove", "--force", target], repo, true);
-    await (0, exec_js_1.capture)("git", ["worktree", "prune"], repo, true);
-}
-
-
-/***/ }),
-
-/***/ 8422:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.readInputs = readInputs;
-exports.checkArguments = checkArguments;
-const core = __importStar(__nccwpck_require__(7484));
-function optional(name) {
-    return core.getInput(name).trim() || undefined;
-}
-function readInputs() {
-    return {
-        version: core.getInput("version").trim() || "latest",
-        binary: optional("binary"),
-        config: optional("config"),
-        failOn: optional("fail-on"),
-        minConfidence: optional("min-confidence"),
-        warnOnly: core.getBooleanInput("warn-only"),
-        focus: optional("focus"),
-        detail: core.getBooleanInput("detail"),
-        target: optional("target"),
-        expected: optional("expected"),
-        maxSpillover: optional("max-spillover"),
-        baseSha: optional("base-sha"),
-        annotations: core.getBooleanInput("annotations"),
-        summary: core.getBooleanInput("summary"),
-        workingDirectory: core.getInput("working-directory").trim() || ".",
-        token: optional("token"),
-    };
-}
-function checkArguments(inputs, baseline) {
-    const args = ["check", "--baseline", baseline, "--json"];
-    if (inputs.failOn)
-        args.push("--fail-on", inputs.failOn);
-    if (inputs.minConfidence)
-        args.push("--min-confidence", inputs.minConfidence);
-    if (inputs.warnOnly)
-        args.push("--warn-only");
-    if (inputs.focus)
-        args.push("--focus", inputs.focus);
-    if (inputs.detail)
-        args.push("--detail");
-    if (inputs.target)
-        args.push("--target", inputs.target);
-    if (inputs.expected)
-        args.push("--expected", inputs.expected);
-    if (inputs.maxSpillover)
-        args.push("--max-spillover", inputs.maxSpillover);
-    if (inputs.config)
-        args.push(inputs.config);
-    return args;
-}
-
-
-/***/ }),
-
-/***/ 232:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.useLocalEnola = useLocalEnola;
-exports.installEnola = installEnola;
-const core = __importStar(__nccwpck_require__(7484));
-const tc = __importStar(__nccwpck_require__(3472));
-const node_crypto_1 = __nccwpck_require__(7598);
-const node_fs_1 = __nccwpck_require__(3024);
-const node_path_1 = __importDefault(__nccwpck_require__(6760));
-const exec_js_1 = __nccwpck_require__(3190);
-function platform() {
-    const os = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
-    const arch = process.arch === "arm64" ? "arm64" : "amd64";
-    return { os, arch, extension: os === "windows" ? ".exe" : "" };
-}
-async function latestVersion(token) {
-    const headers = { Accept: "application/vnd.github+json" };
-    if (token)
-        headers.Authorization = `Bearer ${token}`;
-    const response = await fetch("https://api.github.com/repos/enola-labs/enola/releases/latest", { headers });
-    if (!response.ok)
-        throw new Error(`Unable to resolve latest Enola release: HTTP ${response.status}`);
-    const body = (await response.json());
-    if (!body.tag_name)
-        throw new Error("Latest Enola release has no tag name.");
-    return body.tag_name.replace(/^v/, "");
-}
-async function sha256(file) {
-    const hash = (0, node_crypto_1.createHash)("sha256");
-    hash.update(await node_fs_1.promises.readFile(file));
-    return hash.digest("hex");
-}
-// A locally built engine — the binary the pull request itself produces, or an enterprise
-// wrapper that is never published as an Enola release. It is graded through exactly the
-// same worktree/pin/check path as a downloaded release, so a repository that builds its
-// own engine no longer has to reimplement this workflow in shell.
-//
-// The caller supplies the executable, so there is nothing to verify a checksum against;
-// the trust boundary is the workflow that built it. Everything else is identical.
-async function useLocalEnola(binary, workspace) {
-    const resolved = node_path_1.default.isAbsolute(binary) ? binary : node_path_1.default.resolve(workspace, binary);
-    try {
-        await node_fs_1.promises.access(resolved, node_fs_1.constants.X_OK);
-    }
-    catch {
-        throw new Error(`The binary input does not point at an executable file: ${resolved}`);
-    }
-    // Report the version the way the download path does, so the job summary states which
-    // engine produced the verdict rather than leaving "local" to stand for anything.
-    // --version writes to stderr in Enola and the enterprise wrapper does not implement
-    // --json, so both streams are searched and an unparsable banner is not fatal.
-    const check = await (0, exec_js_1.capture)(resolved, ["--version"], workspace, true);
-    if (check.exitCode !== 0)
-        throw new Error(`The binary input could not start: ${check.stderr.trim() || check.stdout.trim()}`);
-    const banner = `${check.stdout} ${check.stderr}`.trim();
-    const parsed = /version\s+(\S+)/i.exec(banner)?.[1];
-    return { path: resolved, version: parsed ? `${parsed} (local build)` : "local build" };
-}
-async function installEnola(requested, token) {
-    const version = requested === "latest" ? await latestVersion(token) : requested.replace(/^v/, "");
-    const cached = tc.find("enola", version);
-    const executable = process.platform === "win32" ? "enola.exe" : "enola";
-    if (cached)
-        return { path: node_path_1.default.join(cached, executable), version };
-    const target = platform();
-    const baseName = `enola-${version}-${target.os}-${target.arch}`;
-    const release = `https://github.com/enola-labs/enola/releases/download/v${version}`;
-    const archive = await tc.downloadTool(`${release}/${baseName}.tar.gz`);
-    const checksumFile = await tc.downloadTool(`${release}/${baseName}.sha256`);
-    const expected = (await node_fs_1.promises.readFile(checksumFile, "utf8")).trim().split(/\s+/)[0]?.toLowerCase();
-    const actual = await sha256(archive);
-    if (!expected || expected !== actual)
-        throw new Error(`Checksum mismatch for ${baseName}.tar.gz`);
-    const extracted = await tc.extractTar(archive);
-    const releasedBinary = node_path_1.default.join(extracted, `${baseName}${target.extension}`);
-    const installDirectory = await node_fs_1.promises.mkdtemp(node_path_1.default.join(process.env.RUNNER_TEMP || extracted, "enola-tool-"));
-    await node_fs_1.promises.copyFile(releasedBinary, node_path_1.default.join(installDirectory, executable));
-    if (process.platform !== "win32")
-        await node_fs_1.promises.chmod(node_path_1.default.join(installDirectory, executable), 0o755);
-    const cachedDirectory = await tc.cacheDir(installDirectory, "enola", version);
-    core.addPath(cachedDirectory);
-    const check = await (0, exec_js_1.capture)(node_path_1.default.join(cachedDirectory, executable), ["--version"], process.cwd(), true);
-    if (check.exitCode !== 0)
-        throw new Error(`Installed Enola could not start: ${check.stderr.trim()}`);
-    return { path: node_path_1.default.join(cachedDirectory, executable), version };
-}
-
-
-/***/ }),
-
 /***/ 1730:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -34583,14 +34166,14 @@ const core = __importStar(__nccwpck_require__(7484));
 const node_fs_1 = __nccwpck_require__(3024);
 const node_path_1 = __importDefault(__nccwpck_require__(6760));
 const node_os_1 = __importDefault(__nccwpck_require__(8161));
-const annotations_js_1 = __nccwpck_require__(105);
-const context_js_1 = __nccwpck_require__(788);
-const exec_js_1 = __nccwpck_require__(3190);
-const git_js_1 = __nccwpck_require__(1243);
-const inputs_js_1 = __nccwpck_require__(8422);
-const install_js_1 = __nccwpck_require__(232);
-const summary_js_1 = __nccwpck_require__(8855);
-const verdict_js_1 = __nccwpck_require__(3138);
+const annotations_js_1 = __nccwpck_require__(856);
+const context_js_1 = __nccwpck_require__(6761);
+const exec_js_1 = __nccwpck_require__(6886);
+const git_js_1 = __nccwpck_require__(4555);
+const inputs_js_1 = __nccwpck_require__(5725);
+const install_js_1 = __nccwpck_require__(5371);
+const summary_js_1 = __nccwpck_require__(7994);
+const verdict_js_1 = __nccwpck_require__(5187);
 async function run() {
     const inputs = (0, inputs_js_1.readInputs)();
     const eventName = process.env.GITHUB_EVENT_NAME || "";
@@ -34683,7 +34266,502 @@ if (process.env.NODE_ENV !== "test") {
 
 /***/ }),
 
-/***/ 8855:
+/***/ 6886:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.capture = capture;
+const exec = __importStar(__nccwpck_require__(5236));
+async function capture(command, args, cwd, ignoreReturnCode = false) {
+    let stdout = "";
+    let stderr = "";
+    const exitCode = await exec.exec(command, args, {
+        cwd,
+        ignoreReturnCode,
+        silent: true,
+        listeners: {
+            stdout: (data) => (stdout += data.toString()),
+            stderr: (data) => (stderr += data.toString()),
+        },
+    });
+    return { exitCode, stdout, stderr };
+}
+
+
+/***/ }),
+
+/***/ 4555:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ensureCommit = ensureCommit;
+exports.addWorktree = addWorktree;
+exports.removeWorktree = removeWorktree;
+const exec_js_1 = __nccwpck_require__(6886);
+async function ensureCommit(repo, sha) {
+    const present = await (0, exec_js_1.capture)("git", ["cat-file", "-e", `${sha}^{commit}`], repo, true);
+    if (present.exitCode === 0)
+        return;
+    const fetched = await (0, exec_js_1.capture)("git", ["fetch", "--no-tags", "origin", sha], repo, true);
+    if (fetched.exitCode !== 0) {
+        throw new Error(`Unable to fetch base commit ${sha}: ${fetched.stderr.trim()}`);
+    }
+}
+async function addWorktree(repo, target, sha) {
+    const result = await (0, exec_js_1.capture)("git", ["worktree", "add", "--detach", target, sha], repo, true);
+    if (result.exitCode !== 0)
+        throw new Error(`Unable to create base worktree: ${result.stderr.trim()}`);
+}
+async function removeWorktree(repo, target) {
+    await (0, exec_js_1.capture)("git", ["worktree", "remove", "--force", target], repo, true);
+    await (0, exec_js_1.capture)("git", ["worktree", "prune"], repo, true);
+}
+
+
+/***/ }),
+
+/***/ 5371:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.useLocalEnola = useLocalEnola;
+exports.installEnola = installEnola;
+const core = __importStar(__nccwpck_require__(7484));
+const tc = __importStar(__nccwpck_require__(3472));
+const node_crypto_1 = __nccwpck_require__(7598);
+const node_fs_1 = __nccwpck_require__(3024);
+const node_path_1 = __importDefault(__nccwpck_require__(6760));
+const exec_js_1 = __nccwpck_require__(6886);
+function platform() {
+    const os = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
+    const arch = process.arch === "arm64" ? "arm64" : "amd64";
+    return { os, arch, extension: os === "windows" ? ".exe" : "" };
+}
+async function latestVersion(token) {
+    const headers = { Accept: "application/vnd.github+json" };
+    if (token)
+        headers.Authorization = `Bearer ${token}`;
+    const response = await fetch("https://api.github.com/repos/enola-labs/enola/releases/latest", { headers });
+    if (!response.ok)
+        throw new Error(`Unable to resolve latest Enola release: HTTP ${response.status}`);
+    const body = (await response.json());
+    if (!body.tag_name)
+        throw new Error("Latest Enola release has no tag name.");
+    return body.tag_name.replace(/^v/, "");
+}
+async function sha256(file) {
+    const hash = (0, node_crypto_1.createHash)("sha256");
+    hash.update(await node_fs_1.promises.readFile(file));
+    return hash.digest("hex");
+}
+// A locally built engine — the binary the pull request itself produces, or an enterprise
+// wrapper that is never published as an Enola release. It is graded through exactly the
+// same worktree/pin/check path as a downloaded release, so a repository that builds its
+// own engine no longer has to reimplement this workflow in shell.
+//
+// The caller supplies the executable, so there is nothing to verify a checksum against;
+// the trust boundary is the workflow that built it. Everything else is identical.
+async function useLocalEnola(binary, workspace) {
+    const resolved = node_path_1.default.isAbsolute(binary) ? binary : node_path_1.default.resolve(workspace, binary);
+    try {
+        await node_fs_1.promises.access(resolved, node_fs_1.constants.X_OK);
+    }
+    catch {
+        throw new Error(`The binary input does not point at an executable file: ${resolved}`);
+    }
+    // Report the version the way the download path does, so the job summary states which
+    // engine produced the verdict rather than leaving "local" to stand for anything.
+    // --version writes to stderr in Enola and the enterprise wrapper does not implement
+    // --json, so both streams are searched and an unparsable banner is not fatal.
+    const check = await (0, exec_js_1.capture)(resolved, ["--version"], workspace, true);
+    if (check.exitCode !== 0)
+        throw new Error(`The binary input could not start: ${check.stderr.trim() || check.stdout.trim()}`);
+    const banner = `${check.stdout} ${check.stderr}`.trim();
+    const parsed = /version\s+(\S+)/i.exec(banner)?.[1];
+    return { path: resolved, version: parsed ? `${parsed} (local build)` : "local build" };
+}
+async function installEnola(requested, token) {
+    const version = requested === "latest" ? await latestVersion(token) : requested.replace(/^v/, "");
+    const cached = tc.find("enola", version);
+    const executable = process.platform === "win32" ? "enola.exe" : "enola";
+    if (cached)
+        return { path: node_path_1.default.join(cached, executable), version };
+    const target = platform();
+    const baseName = `enola-${version}-${target.os}-${target.arch}`;
+    const release = `https://github.com/enola-labs/enola/releases/download/v${version}`;
+    const archive = await tc.downloadTool(`${release}/${baseName}.tar.gz`);
+    const checksumFile = await tc.downloadTool(`${release}/${baseName}.sha256`);
+    const expected = (await node_fs_1.promises.readFile(checksumFile, "utf8")).trim().split(/\s+/)[0]?.toLowerCase();
+    const actual = await sha256(archive);
+    if (!expected || expected !== actual)
+        throw new Error(`Checksum mismatch for ${baseName}.tar.gz`);
+    const extracted = await tc.extractTar(archive);
+    const releasedBinary = node_path_1.default.join(extracted, `${baseName}${target.extension}`);
+    const installDirectory = await node_fs_1.promises.mkdtemp(node_path_1.default.join(process.env.RUNNER_TEMP || extracted, "enola-tool-"));
+    await node_fs_1.promises.copyFile(releasedBinary, node_path_1.default.join(installDirectory, executable));
+    if (process.platform !== "win32")
+        await node_fs_1.promises.chmod(node_path_1.default.join(installDirectory, executable), 0o755);
+    const cachedDirectory = await tc.cacheDir(installDirectory, "enola", version);
+    core.addPath(cachedDirectory);
+    const check = await (0, exec_js_1.capture)(node_path_1.default.join(cachedDirectory, executable), ["--version"], process.cwd(), true);
+    if (check.exitCode !== 0)
+        throw new Error(`Installed Enola could not start: ${check.stderr.trim()}`);
+    return { path: node_path_1.default.join(cachedDirectory, executable), version };
+}
+
+
+/***/ }),
+
+/***/ 6761:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.resolveRevisionContext = resolveRevisionContext;
+const ZERO_SHA = /^0+$/;
+function resolveRevisionContext(inputs, eventName, payload, sha) {
+    let baseSha = inputs.baseSha;
+    if (!baseSha && eventName === "pull_request") {
+        baseSha = payload.pull_request?.base?.sha;
+    }
+    else if (!baseSha && eventName === "push") {
+        baseSha = payload.before;
+    }
+    else if (!baseSha && eventName === "merge_group") {
+        baseSha = payload.merge_group?.base_sha;
+    }
+    if (!baseSha || ZERO_SHA.test(baseSha)) {
+        throw new Error(`No usable base commit for ${eventName || "this event"}. Set the base-sha input explicitly.`);
+    }
+    if (!sha)
+        throw new Error("GitHub did not provide a current commit SHA.");
+    return { baseSha, headSha: sha, eventName };
+}
+
+
+/***/ }),
+
+/***/ 5725:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.readInputs = readInputs;
+exports.checkArguments = checkArguments;
+const core = __importStar(__nccwpck_require__(7484));
+function optional(name) {
+    return core.getInput(name).trim() || undefined;
+}
+function readInputs() {
+    return {
+        version: core.getInput("version").trim() || "latest",
+        binary: optional("binary"),
+        config: optional("config"),
+        failOn: optional("fail-on"),
+        minConfidence: optional("min-confidence"),
+        warnOnly: core.getBooleanInput("warn-only"),
+        focus: optional("focus"),
+        detail: core.getBooleanInput("detail"),
+        target: optional("target"),
+        expected: optional("expected"),
+        maxSpillover: optional("max-spillover"),
+        baseSha: optional("base-sha"),
+        annotations: core.getBooleanInput("annotations"),
+        summary: core.getBooleanInput("summary"),
+        workingDirectory: core.getInput("working-directory").trim() || ".",
+        token: optional("token"),
+    };
+}
+function checkArguments(inputs, baseline) {
+    const args = ["check", "--baseline", baseline, "--json"];
+    if (inputs.failOn)
+        args.push("--fail-on", inputs.failOn);
+    if (inputs.minConfidence)
+        args.push("--min-confidence", inputs.minConfidence);
+    if (inputs.warnOnly)
+        args.push("--warn-only");
+    if (inputs.focus)
+        args.push("--focus", inputs.focus);
+    if (inputs.detail)
+        args.push("--detail");
+    if (inputs.target)
+        args.push("--target", inputs.target);
+    if (inputs.expected)
+        args.push("--expected", inputs.expected);
+    if (inputs.maxSpillover)
+        args.push("--max-spillover", inputs.maxSpillover);
+    if (inputs.config)
+        args.push(inputs.config);
+    return args;
+}
+
+
+/***/ }),
+
+/***/ 5187:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseVerdict = parseVerdict;
+exports.fatalBreaches = fatalBreaches;
+exports.regressionCount = regressionCount;
+exports.enforcesNothing = enforcesNothing;
+exports.assertExitCode = assertExitCode;
+exports.saveVerdict = saveVerdict;
+const node_fs_1 = __nccwpck_require__(3024);
+const statuses = new Set(["clean", "regression", "usage_error", "incomparable"]);
+const exitCodes = {
+    clean: 0,
+    regression: 1,
+    usage_error: 2,
+    incomparable: 3,
+};
+function parseVerdict(raw) {
+    let value;
+    try {
+        value = JSON.parse(raw);
+    }
+    catch (error) {
+        throw new Error(`Enola returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!value || typeof value !== "object")
+        throw new Error("Enola verdict is not an object.");
+    const verdict = value;
+    if (!verdict.status || !statuses.has(verdict.status))
+        throw new Error(`Unknown Enola status: ${verdict.status}`);
+    for (const key of ["edges_added", "edges_removed", "facts_added", "facts_removed"]) {
+        if (typeof verdict[key] !== "number")
+            throw new Error(`Enola verdict is missing numeric ${key}.`);
+    }
+    return verdict;
+}
+function fatalBreaches(verdict) {
+    return (verdict.breaches || []).filter((breach) => breach.fatal);
+}
+// What the job should call "a regression", counted in ONE place.
+//
+// A change can be a regression with zero failing findings: `max-spillover` gates on a
+// measurement rather than a finding, and Enola marks that breach fatal. Counting only
+// `failures` produced a job that failed with the summary "0 structural regression(s)
+// introduced" and no section saying why — the exact contradiction Enola's own renderer
+// counts breaches to avoid. Every surface that reports a count reads this.
+function regressionCount(verdict) {
+    return (verdict.failures || []).length + fatalBreaches(verdict).length;
+}
+// Whether this run could have failed at all.
+//
+// Enola fails nothing unless a policy names it: no `fail-on`, no `max-spillover`, and
+// every finding is reported while the job stays green. That is a legitimate way to run
+// the action — a pull-request report rather than a gate — but it is indistinguishable
+// from a working gate if nobody says so, and a green check nobody configured is the
+// worst outcome this action has: it looks like protection and is not.
+function enforcesNothing(verdict) {
+    const policy = verdict.policy;
+    if (!policy)
+        return false; // An older Enola that does not report its policy.
+    return (policy.fail_explainers || []).length === 0 && (policy.thresholds || []).length === 0;
+}
+function assertExitCode(verdict, exitCode) {
+    const expected = exitCodes[verdict.status];
+    if (exitCode !== expected) {
+        throw new Error(`Enola status ${verdict.status} requires exit code ${expected}, received ${exitCode}.`);
+    }
+}
+async function saveVerdict(file, raw) {
+    await node_fs_1.promises.writeFile(file, `${raw.trim()}\n`, "utf8");
+}
+
+
+/***/ }),
+
+/***/ 856:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.annotate = annotate;
+const core = __importStar(__nccwpck_require__(7484));
+const LIMIT = 10;
+function location(finding) {
+    if (finding.location?.file)
+        return finding.location;
+    const evidence = finding.evidence?.find((item) => item.file);
+    return evidence?.file ? { file: evidence.file } : undefined;
+}
+function properties(finding) {
+    const at = location(finding);
+    return {
+        title: `Enola: ${finding.source || "architecture"}`,
+        file: at?.file,
+        startLine: at?.line,
+        endLine: at?.end_line || at?.line,
+    };
+}
+function message(finding) {
+    return `${finding.title} (confidence ${finding.confidence.toFixed(2)})`;
+}
+function annotate(verdict) {
+    for (const finding of (verdict.failures || []).slice(0, LIMIT)) {
+        core.error(message(finding), properties(finding));
+    }
+    for (const finding of (verdict.advisories || []).slice(0, LIMIT)) {
+        core.warning(message(finding), properties(finding));
+    }
+    if (verdict.status === "incomparable") {
+        core.error(`Enola refused to grade this change: ${(verdict.comparability_warnings || []).join("; ") || "snapshots are not comparable"}`);
+    }
+}
+
+
+/***/ }),
+
+/***/ 7994:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -34725,7 +34803,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.logVerdict = logVerdict;
 exports.writeSummary = writeSummary;
 const core = __importStar(__nccwpck_require__(7484));
-const verdict_js_1 = __nccwpck_require__(3138);
+const verdict_js_1 = __nccwpck_require__(5187);
 function short(sha) {
     return sha.slice(0, 8);
 }
@@ -34815,84 +34893,6 @@ async function writeSummary(verdict, baseSha, headSha, version) {
     markdown += `| Edges | ${verdict.edges_added} | ${verdict.edges_removed} |\n`;
     markdown += `| Findings | ${failures.length + advisories.length} | ${(verdict.resolved || []).length} |\n`;
     await core.summary.addRaw(markdown).write();
-}
-
-
-/***/ }),
-
-/***/ 3138:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parseVerdict = parseVerdict;
-exports.fatalBreaches = fatalBreaches;
-exports.regressionCount = regressionCount;
-exports.enforcesNothing = enforcesNothing;
-exports.assertExitCode = assertExitCode;
-exports.saveVerdict = saveVerdict;
-const node_fs_1 = __nccwpck_require__(3024);
-const statuses = new Set(["clean", "regression", "usage_error", "incomparable"]);
-const exitCodes = {
-    clean: 0,
-    regression: 1,
-    usage_error: 2,
-    incomparable: 3,
-};
-function parseVerdict(raw) {
-    let value;
-    try {
-        value = JSON.parse(raw);
-    }
-    catch (error) {
-        throw new Error(`Enola returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    if (!value || typeof value !== "object")
-        throw new Error("Enola verdict is not an object.");
-    const verdict = value;
-    if (!verdict.status || !statuses.has(verdict.status))
-        throw new Error(`Unknown Enola status: ${verdict.status}`);
-    for (const key of ["edges_added", "edges_removed", "facts_added", "facts_removed"]) {
-        if (typeof verdict[key] !== "number")
-            throw new Error(`Enola verdict is missing numeric ${key}.`);
-    }
-    return verdict;
-}
-function fatalBreaches(verdict) {
-    return (verdict.breaches || []).filter((breach) => breach.fatal);
-}
-// What the job should call "a regression", counted in ONE place.
-//
-// A change can be a regression with zero failing findings: `max-spillover` gates on a
-// measurement rather than a finding, and Enola marks that breach fatal. Counting only
-// `failures` produced a job that failed with the summary "0 structural regression(s)
-// introduced" and no section saying why — the exact contradiction Enola's own renderer
-// counts breaches to avoid. Every surface that reports a count reads this.
-function regressionCount(verdict) {
-    return (verdict.failures || []).length + fatalBreaches(verdict).length;
-}
-// Whether this run could have failed at all.
-//
-// Enola fails nothing unless a policy names it: no `fail-on`, no `max-spillover`, and
-// every finding is reported while the job stays green. That is a legitimate way to run
-// the action — a pull-request report rather than a gate — but it is indistinguishable
-// from a working gate if nobody says so, and a green check nobody configured is the
-// worst outcome this action has: it looks like protection and is not.
-function enforcesNothing(verdict) {
-    const policy = verdict.policy;
-    if (!policy)
-        return false; // An older Enola that does not report its policy.
-    return (policy.fail_explainers || []).length === 0 && (policy.thresholds || []).length === 0;
-}
-function assertExitCode(verdict, exitCode) {
-    const expected = exitCodes[verdict.status];
-    if (exitCode !== expected) {
-        throw new Error(`Enola status ${verdict.status} requires exit code ${expected}, received ${exitCode}.`);
-    }
-}
-async function saveVerdict(file, raw) {
-    await node_fs_1.promises.writeFile(file, `${raw.trim()}\n`, "utf8");
 }
 
 

@@ -7,8 +7,8 @@ const { write, addRaw } = vi.hoisted(() => {
 });
 vi.mock("@actions/core", () => ({ summary: { addRaw } }));
 
-import { writeSummary } from "../src/summary.js";
-import { Verdict } from "../src/types.js";
+import { writeSummary } from "../src/report/summary.js";
+import { Verdict } from "../src/core/types.js";
 
 function verdict(overrides: Partial<Verdict>): Verdict {
   return { status: "clean", edges_added: 1, edges_removed: 2, facts_added: 3, facts_removed: 4, ...overrides };
