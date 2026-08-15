@@ -1,4 +1,4 @@
-import { Inputs, RevisionContext, WebhookPayload } from "./types.js";
+import { Inputs, RevisionContext, WebhookPayload } from "../core/types.js";
 
 const ZERO_SHA = /^0+$/;
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolveRevisionContext } from "../src/context.js";
-import { Inputs } from "../src/types.js";
+import { resolveRevisionContext } from "../src/policy/context.js";
+import { Inputs } from "../src/core/types.js";
 
 const inputs = { baseSha: undefined } as Inputs;
 

@@ -18,7 +18,9 @@ inputs:
     description: Optional repository-relative mcp-arch.yaml path
     required: false
   fail-on:
-    description: Comma-separated explainer names whose new findings fail
+    description: >-
+      Comma-separated explainer names whose new findings fail the job. Unset means
+      nothing fails: findings are reported and the job stays green.
     required: false
   min-confidence:
     description: Confidence floor within failing explainers

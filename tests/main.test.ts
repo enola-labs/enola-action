@@ -13,37 +13,37 @@ const fsMock = vi.hoisted(() => ({ readFile: vi.fn(), mkdtemp: vi.fn() }));
 vi.mock("node:fs", () => ({ promises: fsMock }));
 
 const annotate = vi.hoisted(() => vi.fn());
-vi.mock("../src/annotations.js", () => ({ annotate }));
+vi.mock("../src/report/annotations.js", () => ({ annotate }));
 
 const contextModule = vi.hoisted(() => ({ resolveRevisionContext: vi.fn() }));
-vi.mock("../src/context.js", () => contextModule);
+vi.mock("../src/policy/context.js", () => contextModule);
 
 const capture = vi.hoisted(() => vi.fn());
-vi.mock("../src/exec.js", () => ({ capture }));
+vi.mock("../src/platform/exec.js", () => ({ capture }));
 
 const git = vi.hoisted(() => ({ ensureCommit: vi.fn(), addWorktree: vi.fn(), removeWorktree: vi.fn() }));
-vi.mock("../src/git.js", () => git);
+vi.mock("../src/platform/git.js", () => git);
 
 const inputsModule = vi.hoisted(() => ({ readInputs: vi.fn(), checkArguments: vi.fn(() => ["check", "--json"]) }));
-vi.mock("../src/inputs.js", () => inputsModule);
+vi.mock("../src/policy/inputs.js", () => inputsModule);
 
 const install = vi.hoisted(() => ({ installEnola: vi.fn(), useLocalEnola: vi.fn() }));
-vi.mock("../src/install.js", () => install);
+vi.mock("../src/platform/install.js", () => install);
 
 const summaryModule = vi.hoisted(() => ({ writeSummary: vi.fn(), logVerdict: vi.fn() }));
-vi.mock("../src/summary.js", () => summaryModule);
+vi.mock("../src/report/summary.js", () => summaryModule);
 
 const verdictModule = vi.hoisted(() => ({ parseVerdict: vi.fn(), assertExitCode: vi.fn(), saveVerdict: vi.fn() }));
 // Only the three that touch the outside world are stubbed. regressionCount and
 // fatalBreaches are pure functions of the verdict, and re-implementing them in a mock
 // would let main.ts and the tests drift apart on the one number the job is graded by.
-vi.mock("../src/verdict.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/verdict.js")>()),
+vi.mock("../src/policy/verdict.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/policy/verdict.js")>()),
   ...verdictModule,
 }));
 
 import { run } from "../src/main.js";
-import { Inputs } from "../src/types.js";
+import { Inputs } from "../src/core/types.js";
 
 const baseEnv = {
   GITHUB_EVENT_NAME: "pull_request",
@@ -178,5 +178,44 @@ describe("run", () => {
     });
     await expect(run()).rejects.toThrow("boom");
     expect(git.removeWorktree).toHaveBeenCalled();
+  });
+});
+
+describe("the base worktree's directory name", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.assign(process.env, baseEnv);
+    fsMock.readFile.mockResolvedValue("{}");
+    fsMock.mkdtemp.mockResolvedValue("/tmp/enola-action-xyz");
+    contextModule.resolveRevisionContext.mockReturnValue({
+      baseSha: "basesha",
+      headSha: "headsha",
+      eventName: "pull_request",
+    });
+    install.installEnola.mockResolvedValue({ path: "/bin/enola", version: "1.2.3" });
+    inputsModule.readInputs.mockReturnValue(defaultInputs());
+    capture
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: JSON.stringify({ status: "clean" }), stderr: "" });
+    verdictModule.parseVerdict.mockReturnValue({
+      status: "clean",
+      failures: [],
+      advisories: [],
+      edges_added: 0,
+      edges_removed: 0,
+      facts_added: 0,
+      facts_removed: 0,
+    });
+  });
+
+  // Enola labels each fact with the indexed directory's basename, and that label is part
+  // of the key a diff matches on. A worktree named anything other than the workspace
+  // makes every fact in the base snapshot unmatchable, and the delta reports the whole
+  // repository as added and removed — while the verdict still looks plausible, because
+  // findings are keyed by title rather than by repo.
+  it("matches the workspace, so base and head facts share a repository label", async () => {
+    await run();
+    const [, worktreePath] = git.addWorktree.mock.calls[0];
+    expect(worktreePath).toBe("/tmp/enola-action-xyz/workspace");
   });
 });

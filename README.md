@@ -25,7 +25,15 @@ jobs:
       - uses: enola-labs/enola-action@v1
 ```
 
-With no inputs, one thing fails the job: a **newly introduced dependency cycle**. Enola still runs all eleven of its checks - it calls them **explainers** - and everything the other ten find is reported as advisory. That is a default, not a limit: `fail-on` promotes any of them, and `max-spillover` can fail a pull request with no failing findings at all. See [what fails the job](#what-fails-the-job).
+With no inputs, **nothing fails the job**. Enola runs all eleven of its checks - it calls them **explainers** - reports everything they find on the pull request, and stays green: the workflow above is a report, and the summary says so in as many words. One input turns it into a gate:
+
+```yaml
+      - uses: enola-labs/enola-action@v1
+        with:
+          fail-on: layers      # …or cycles, intent, or any of the eleven
+```
+
+That is deliberate. What counts as an architectural regression is a decision about *your* codebase - a dependency cycle is a defect in one repository and ordinary practice in the next - so the action never picks one for you. See [what fails the job](#what-fails-the-job).
 
 Enola runs entirely on the GitHub runner; source code is not uploaded by this action.
 
@@ -35,8 +43,8 @@ Two separate things decide that: what Enola **finds**, and what your inputs **fa
 
 | Input | What it does |
 |---|---|
-| *(none)* | fail on a new `cycles` finding at confidence `1.00` |
-| `fail-on` | **replaces** that list. `fail-on: layers` stops failing on cycles - write `cycles,layers` for both |
+| *(none)* | nothing fails. Every finding is reported, the job is green, and the summary carries a **No policy set** notice so the green is not mistaken for a verdict |
+| `fail-on` | the policy. `fail-on: layers` fails on new layer violations; `fail-on: cycles,layers` on both |
 | `min-confidence` | **lowers** the floor within those explainers. The default is `1.00`, already the strictest value; `0.8` makes the job fail on *more*, not less |
 | `max-spillover` | fails when the change reached more than N packages outside the `target` you declared. This is not a finding, and it can fail a job whose findings are all clean |
 | `warn-only` | downgrades findings and spillover breaches to warnings. It does **not** suppress a check that could not run: a missing base still fails, and an incomparable base still makes Enola decline to grade |
@@ -45,17 +53,18 @@ Two separate things decide that: what Enola **finds**, and what your inputs **fa
 
 | You want | Set |
 |---|---|
-| The default: fail only on new cycles | *omit `fail-on` entirely* |
-| Also fail on an undeclared cross-repo seam, and on a layer order you declared being crossed the wrong way | `fail-on: cycles,intent,layers` |
-| Everything Enola proves, plus the eight it infers | `fail-on: cycles,intent,layers,crossrepo,coverage,unused-routes,god-class,hotspots,dependency-depth,exported-surface,complexity-outliers` **and** `min-confidence: "0.8"` |
-| Report everything, fail nothing | `warn-only: "true"` |
+| The default: report everything, fail nothing | *omit `fail-on` entirely* |
+| Fail on a layer order you declared being crossed the wrong way | `fail-on: layers` |
+| Also fail on an undeclared cross-repo seam, and on new cycles | `fail-on: layers,intent,cycles` |
+| Everything Enola proves, plus the eight it infers | `fail-on: layers,intent,cycles,crossrepo,coverage,unused-routes,god-class,hotspots,dependency-depth,exported-surface,complexity-outliers` **and** `min-confidence: "0.8"` |
+| Enforce a policy, but only warn on this branch | `fail-on: layers` **and** `warn-only: "true"` |
 | Fail if the change spread outside the area you named | `target: internal/auth` **and** `max-spillover: "0"` |
 
-The third row needs both halves, which is the trap below in one line: the names alone would change nothing.
+The fourth row needs both halves, which is the trap below in one line: the names alone would change nothing.
 
 ### What lands on the pull request
 
-A failing run, with `fail-on: cycles,layers` and no cycle in the change. The job summary, verbatim:
+A failing run, with `fail-on: layers`. The job summary, verbatim:
 
 > # Enola architecture check
 >
@@ -67,7 +76,7 @@ A failing run, with `fail-on: cycles,layers` and no cycle in the change. The job
 >
 > ## Regressions
 >
-> - **layers · 1.00** — Layer violation: storage -> api — `src/storage/mod.rs`
+> - **layers · 1.00** — Layer violation: storage -> delivery — `storage/storage.go`
 >
 > ## Architectural change
 >
@@ -77,10 +86,11 @@ A failing run, with `fail-on: cycles,layers` and no cycle in the change. The job
 > | Edges | 2 | 0 |
 > | Findings | 1 | 0 |
 
-The same finding also lands on `src/storage/mod.rs` as a source annotation, so it shows up in the **Files changed** tab next to the import that caused it. Had this been an advisory rather than a regression, it would appear under its own heading and annotate as a warning, and the job would pass.
+The same finding also lands on `storage/storage.go` as a source annotation, so it shows up in the **Files changed** tab next to the import that caused it. Without `fail-on: layers` the identical finding appears under **Findings (reported, not enforced)**, annotates as a warning, and the job passes.
 
-Two traps worth knowing before you set `fail-on`:
+Three traps worth knowing before you set `fail-on`:
 
+- **No `fail-on` means no gate.** A workflow that sets neither `fail-on` nor `max-spillover` cannot fail, whatever Enola finds. The action emits a job warning and a summary notice on every such run rather than letting a green check speak for itself, but a required status check configured on it is protecting nothing.
 - **A misspelled name is not an error.** It matches nothing, so the gate quietly stops enforcing what you thought you asked for. The `verdict-file` output holds the policy that actually ran.
 - **Naming an explainer is not always enough, because the floor applies per finding.** Only three of the eleven ever reach `1.00`: `cycles`, `intent`, and `layers` when the layer order is *declared* in `enola-intent.yaml`. Everything else is inferred rather than proven and is capped at `0.95` by design, so it cannot fail at the default floor no matter what you put in `fail-on`. Naming any of the other eight is a no-op until you also lower `min-confidence`.
 
@@ -91,11 +101,10 @@ Every input is optional. The workflow above is the whole setup.
 ```yaml
 - uses: enola-labs/enola-action@v1
   with:
-    # Explainers whose new findings fail the job. Replaces the default, which is
-    # cycles alone. Any of: cycles, layers, intent, crossrepo, coverage,
-    # unused-routes, god-class, hotspots, dependency-depth, exported-surface,
-    # complexity-outliers
-    fail-on: cycles,layers,intent
+    # Explainers whose new findings fail the job. WITHOUT THIS INPUT NOTHING FAILS.
+    # Any of: cycles, layers, intent, crossrepo, coverage, unused-routes, god-class,
+    # hotspots, dependency-depth, exported-surface, complexity-outliers
+    fail-on: layers,intent,cycles
     # Confidence floor within those explainers. Default "1.00" — only cycles, intent
     # and declared-layer violations reach it, so lower this to enforce the rest.
     min-confidence: "0.8"
@@ -119,7 +128,7 @@ Sixteen, all optional, defaults in the right-hand column.
 
 | Input | Default | What it does |
 |---|---|---|
-| `fail-on` | `cycles` | explainer names whose new findings fail the job; replaces the default |
+| `fail-on` | - | explainer names whose new findings fail the job. Unset means nothing fails |
 | `min-confidence` | `1.00` | confidence floor within those explainers; lowering it fails on more |
 | `warn-only` | `false` | report findings and spillover breaches without failing the job |
 | `target` | - | the symbol, type or package this change is meant to be about |
@@ -167,7 +176,7 @@ Same explainers, same exit codes. What the action adds is the pull-request wirin
 
 - **[enola](https://github.com/enola-labs/enola)** - what it is, what fails a build, and the 20+ languages it parses
 - **[docs/CLI.md](https://github.com/enola-labs/enola/blob/main/docs/CLI.md)** - the flags behind the `fail-on`, `min-confidence`, `target` and `max-spillover` inputs
-- **[docs/EXPLAINERS.md](https://github.com/enola-labs/enola/blob/main/docs/EXPLAINERS.md)** - what each explainer computes, and why cycles are the one thing that fails by default
+- **[docs/EXPLAINERS.md](https://github.com/enola-labs/enola/blob/main/docs/EXPLAINERS.md)** - what each explainer computes, and which of them Enola proves rather than infers
 - **MCP** - the same graph inside your agent, before it edits rather than only after
 
 ## Security

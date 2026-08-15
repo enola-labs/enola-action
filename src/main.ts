@@ -2,15 +2,15 @@ import * as core from "@actions/core";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { annotate } from "./annotations.js";
-import { resolveRevisionContext } from "./context.js";
-import { capture } from "./exec.js";
-import { addWorktree, ensureCommit, removeWorktree } from "./git.js";
-import { checkArguments, readInputs } from "./inputs.js";
-import { installEnola, useLocalEnola } from "./install.js";
-import { logVerdict, writeSummary } from "./summary.js";
-import { WebhookPayload } from "./types.js";
-import { assertExitCode, parseVerdict, regressionCount, saveVerdict } from "./verdict.js";
+import { annotate } from "./report/annotations.js";
+import { resolveRevisionContext } from "./policy/context.js";
+import { capture } from "./platform/exec.js";
+import { addWorktree, ensureCommit, removeWorktree } from "./platform/git.js";
+import { checkArguments, readInputs } from "./policy/inputs.js";
+import { installEnola, useLocalEnola } from "./platform/install.js";
+import { logVerdict, writeSummary } from "./report/summary.js";
+import { WebhookPayload } from "./core/types.js";
+import { assertExitCode, parseVerdict, regressionCount, saveVerdict } from "./policy/verdict.js";
 
 export async function run(): Promise<void> {
   const inputs = readInputs();
@@ -36,7 +36,19 @@ export async function run(): Promise<void> {
   await ensureCommit(headRoot, revisions.baseSha);
 
   const temporaryRoot = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || os.tmpdir(), "enola-action-"));
-  const baseRoot = path.join(temporaryRoot, "base");
+  // The base worktree MUST carry the same directory name as the head checkout.
+  //
+  // Enola labels every fact with the repository it came from, and that label is the
+  // indexed directory's basename. A worktree called "base" therefore produces facts
+  // labelled `base` while the workspace produces `enola` — different keys for the same
+  // code, so a diff between them reports the entire graph as added and removed. The
+  // comparability check does not catch it: it identifies a repository by its normalized
+  // git remote, which a linked worktree shares, so the gate grades a delta that is
+  // meaningless rather than declining to.
+  //
+  // Findings survive it (they are keyed by title, not by repo), which is exactly why
+  // this stayed invisible: the verdict looked right while every count under it was wrong.
+  const baseRoot = path.join(temporaryRoot, path.basename(headRoot));
   const verdictFile = path.join(temporaryRoot, "verdict.json");
   await addWorktree(headRoot, baseRoot, revisions.baseSha);
 

@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { Breach, Verdict, VerdictStatus } from "./types.js";
+import { Breach, Verdict, VerdictStatus } from "../core/types.js";
 
 const statuses = new Set<VerdictStatus>(["clean", "regression", "usage_error", "incomparable"]);
 const exitCodes: Record<VerdictStatus, number> = {
@@ -38,6 +38,19 @@ export function fatalBreaches(verdict: Verdict): Breach[] {
 // counts breaches to avoid. Every surface that reports a count reads this.
 export function regressionCount(verdict: Verdict): number {
   return (verdict.failures || []).length + fatalBreaches(verdict).length;
+}
+
+// Whether this run could have failed at all.
+//
+// Enola fails nothing unless a policy names it: no `fail-on`, no `max-spillover`, and
+// every finding is reported while the job stays green. That is a legitimate way to run
+// the action — a pull-request report rather than a gate — but it is indistinguishable
+// from a working gate if nobody says so, and a green check nobody configured is the
+// worst outcome this action has: it looks like protection and is not.
+export function enforcesNothing(verdict: Verdict): boolean {
+  const policy = verdict.policy;
+  if (!policy) return false; // An older Enola that does not report its policy.
+  return (policy.fail_explainers || []).length === 0 && (policy.thresholds || []).length === 0;
 }
 
 export function assertExitCode(verdict: Verdict, exitCode: number): void {

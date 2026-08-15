@@ -34119,7 +34119,7 @@ module.exports = {
 
 /***/ }),
 
-/***/ 105:
+/***/ 1730:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -34157,74 +34157,116 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.annotate = annotate;
+exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
-const LIMIT = 10;
-function location(finding) {
-    if (finding.location?.file)
-        return finding.location;
-    const evidence = finding.evidence?.find((item) => item.file);
-    return evidence?.file ? { file: evidence.file } : undefined;
-}
-function properties(finding) {
-    const at = location(finding);
-    return {
-        title: `Enola: ${finding.source || "architecture"}`,
-        file: at?.file,
-        startLine: at?.line,
-        endLine: at?.end_line || at?.line,
-    };
-}
-function message(finding) {
-    return `${finding.title} (confidence ${finding.confidence.toFixed(2)})`;
-}
-function annotate(verdict) {
-    for (const finding of (verdict.failures || []).slice(0, LIMIT)) {
-        core.error(message(finding), properties(finding));
+const node_fs_1 = __nccwpck_require__(3024);
+const node_path_1 = __importDefault(__nccwpck_require__(6760));
+const node_os_1 = __importDefault(__nccwpck_require__(8161));
+const annotations_js_1 = __nccwpck_require__(856);
+const context_js_1 = __nccwpck_require__(6761);
+const exec_js_1 = __nccwpck_require__(6886);
+const git_js_1 = __nccwpck_require__(4555);
+const inputs_js_1 = __nccwpck_require__(5725);
+const install_js_1 = __nccwpck_require__(5371);
+const summary_js_1 = __nccwpck_require__(7994);
+const verdict_js_1 = __nccwpck_require__(5187);
+async function run() {
+    const inputs = (0, inputs_js_1.readInputs)();
+    const eventName = process.env.GITHUB_EVENT_NAME || "";
+    const eventPath = process.env.GITHUB_EVENT_PATH;
+    const payload = eventPath ? JSON.parse(await node_fs_1.promises.readFile(eventPath, "utf8")) : {};
+    const revisions = (0, context_js_1.resolveRevisionContext)(inputs, eventName, payload, process.env.GITHUB_SHA || "");
+    const workspace = process.env.GITHUB_WORKSPACE;
+    if (!workspace)
+        throw new Error("GITHUB_WORKSPACE is not set.");
+    const headRoot = node_path_1.default.resolve(workspace);
+    const headDirectory = node_path_1.default.resolve(headRoot, inputs.workingDirectory);
+    if (!headDirectory.startsWith(`${headRoot}${node_path_1.default.sep}`) && headDirectory !== headRoot) {
+        throw new Error("working-directory must stay inside GITHUB_WORKSPACE.");
     }
-    for (const finding of (verdict.advisories || []).slice(0, LIMIT)) {
-        core.warning(message(finding), properties(finding));
+    if (inputs.binary && inputs.version !== "latest") {
+        core.warning("Both binary and version were set; binary wins and the release is not downloaded.");
     }
-    if (verdict.status === "incomparable") {
-        core.error(`Enola refused to grade this change: ${(verdict.comparability_warnings || []).join("; ") || "snapshots are not comparable"}`);
+    const installed = inputs.binary
+        ? await (0, install_js_1.useLocalEnola)(inputs.binary, headRoot)
+        : await (0, install_js_1.installEnola)(inputs.version, inputs.token);
+    core.info(`Using Enola ${installed.version}`);
+    await (0, git_js_1.ensureCommit)(headRoot, revisions.baseSha);
+    const temporaryRoot = await node_fs_1.promises.mkdtemp(node_path_1.default.join(process.env.RUNNER_TEMP || node_os_1.default.tmpdir(), "enola-action-"));
+    // The base worktree MUST carry the same directory name as the head checkout.
+    //
+    // Enola labels every fact with the repository it came from, and that label is the
+    // indexed directory's basename. A worktree called "base" therefore produces facts
+    // labelled `base` while the workspace produces `enola` — different keys for the same
+    // code, so a diff between them reports the entire graph as added and removed. The
+    // comparability check does not catch it: it identifies a repository by its normalized
+    // git remote, which a linked worktree shares, so the gate grades a delta that is
+    // meaningless rather than declining to.
+    //
+    // Findings survive it (they are keyed by title, not by repo), which is exactly why
+    // this stayed invisible: the verdict looked right while every count under it was wrong.
+    const baseRoot = node_path_1.default.join(temporaryRoot, node_path_1.default.basename(headRoot));
+    const verdictFile = node_path_1.default.join(temporaryRoot, "verdict.json");
+    await (0, git_js_1.addWorktree)(headRoot, baseRoot, revisions.baseSha);
+    try {
+        const baseDirectory = node_path_1.default.resolve(baseRoot, inputs.workingDirectory);
+        const baseConfig = inputs.config ? node_path_1.default.resolve(baseRoot, inputs.config) : undefined;
+        const headConfig = inputs.config ? node_path_1.default.resolve(headRoot, inputs.config) : undefined;
+        const pinArgs = ["baseline", "pin"];
+        if (baseConfig)
+            pinArgs.push(baseConfig);
+        const pin = await (0, exec_js_1.capture)(installed.path, pinArgs, baseDirectory, true);
+        if (pin.exitCode !== 0)
+            throw new Error(`Unable to create base snapshot: ${pin.stderr.trim() || pin.stdout.trim()}`);
+        const baseline = node_path_1.default.join(baseDirectory, ".enola", "baseline");
+        const headInputs = { ...inputs, config: headConfig };
+        const result = await (0, exec_js_1.capture)(installed.path, (0, inputs_js_1.checkArguments)(headInputs, baseline), headDirectory, true);
+        let verdict;
+        try {
+            verdict = (0, verdict_js_1.parseVerdict)(result.stdout);
+        }
+        catch (error) {
+            throw new Error(`${error instanceof Error ? error.message : String(error)}\n${result.stderr.trim()}`.trim());
+        }
+        (0, verdict_js_1.assertExitCode)(verdict, result.exitCode);
+        await (0, verdict_js_1.saveVerdict)(verdictFile, result.stdout);
+        core.setOutput("status", verdict.status);
+        core.setOutput("regressions", (0, verdict_js_1.regressionCount)(verdict));
+        core.setOutput("advisories", (verdict.advisories || []).length);
+        core.setOutput("facts-added", verdict.facts_added);
+        core.setOutput("facts-removed", verdict.facts_removed);
+        core.setOutput("edges-added", verdict.edges_added);
+        core.setOutput("edges-removed", verdict.edges_removed);
+        core.setOutput("verdict-file", verdictFile);
+        (0, summary_js_1.logVerdict)(verdict);
+        if (inputs.annotations)
+            (0, annotations_js_1.annotate)(verdict);
+        if (inputs.summary)
+            await (0, summary_js_1.writeSummary)(verdict, revisions.baseSha, revisions.headSha, installed.version);
+        if (verdict.status !== "clean") {
+            core.setFailed(verdict.status === "regression"
+                ? `${(0, verdict_js_1.regressionCount)(verdict)} architectural regression(s) introduced.`
+                : verdict.status === "incomparable"
+                    ? "Enola refused to grade incomparable snapshots."
+                    : "Enola could not complete the architecture check.");
+        }
     }
+    finally {
+        await (0, git_js_1.removeWorktree)(headRoot, baseRoot);
+    }
+}
+if (process.env.NODE_ENV !== "test") {
+    run().catch((error) => core.setFailed(error instanceof Error ? error.message : String(error)));
 }
 
 
 /***/ }),
 
-/***/ 788:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.resolveRevisionContext = resolveRevisionContext;
-const ZERO_SHA = /^0+$/;
-function resolveRevisionContext(inputs, eventName, payload, sha) {
-    let baseSha = inputs.baseSha;
-    if (!baseSha && eventName === "pull_request") {
-        baseSha = payload.pull_request?.base?.sha;
-    }
-    else if (!baseSha && eventName === "push") {
-        baseSha = payload.before;
-    }
-    else if (!baseSha && eventName === "merge_group") {
-        baseSha = payload.merge_group?.base_sha;
-    }
-    if (!baseSha || ZERO_SHA.test(baseSha)) {
-        throw new Error(`No usable base commit for ${eventName || "this event"}. Set the base-sha input explicitly.`);
-    }
-    if (!sha)
-        throw new Error("GitHub did not provide a current commit SHA.");
-    return { baseSha, headSha: sha, eventName };
-}
-
-
-/***/ }),
-
-/***/ 3190:
+/***/ 6886:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -34283,7 +34325,7 @@ async function capture(command, args, cwd, ignoreReturnCode = false) {
 
 /***/ }),
 
-/***/ 1243:
+/***/ 4555:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -34292,7 +34334,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ensureCommit = ensureCommit;
 exports.addWorktree = addWorktree;
 exports.removeWorktree = removeWorktree;
-const exec_js_1 = __nccwpck_require__(3190);
+const exec_js_1 = __nccwpck_require__(6886);
 async function ensureCommit(repo, sha) {
     const present = await (0, exec_js_1.capture)("git", ["cat-file", "-e", `${sha}^{commit}`], repo, true);
     if (present.exitCode === 0)
@@ -34315,7 +34357,167 @@ async function removeWorktree(repo, target) {
 
 /***/ }),
 
-/***/ 8422:
+/***/ 5371:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.useLocalEnola = useLocalEnola;
+exports.installEnola = installEnola;
+const core = __importStar(__nccwpck_require__(7484));
+const tc = __importStar(__nccwpck_require__(3472));
+const node_crypto_1 = __nccwpck_require__(7598);
+const node_fs_1 = __nccwpck_require__(3024);
+const node_path_1 = __importDefault(__nccwpck_require__(6760));
+const exec_js_1 = __nccwpck_require__(6886);
+function platform() {
+    const os = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
+    const arch = process.arch === "arm64" ? "arm64" : "amd64";
+    return { os, arch, extension: os === "windows" ? ".exe" : "" };
+}
+async function latestVersion(token) {
+    const headers = { Accept: "application/vnd.github+json" };
+    if (token)
+        headers.Authorization = `Bearer ${token}`;
+    const response = await fetch("https://api.github.com/repos/enola-labs/enola/releases/latest", { headers });
+    if (!response.ok)
+        throw new Error(`Unable to resolve latest Enola release: HTTP ${response.status}`);
+    const body = (await response.json());
+    if (!body.tag_name)
+        throw new Error("Latest Enola release has no tag name.");
+    return body.tag_name.replace(/^v/, "");
+}
+async function sha256(file) {
+    const hash = (0, node_crypto_1.createHash)("sha256");
+    hash.update(await node_fs_1.promises.readFile(file));
+    return hash.digest("hex");
+}
+// A locally built engine — the binary the pull request itself produces, or an enterprise
+// wrapper that is never published as an Enola release. It is graded through exactly the
+// same worktree/pin/check path as a downloaded release, so a repository that builds its
+// own engine no longer has to reimplement this workflow in shell.
+//
+// The caller supplies the executable, so there is nothing to verify a checksum against;
+// the trust boundary is the workflow that built it. Everything else is identical.
+async function useLocalEnola(binary, workspace) {
+    const resolved = node_path_1.default.isAbsolute(binary) ? binary : node_path_1.default.resolve(workspace, binary);
+    try {
+        await node_fs_1.promises.access(resolved, node_fs_1.constants.X_OK);
+    }
+    catch {
+        throw new Error(`The binary input does not point at an executable file: ${resolved}`);
+    }
+    // Report the version the way the download path does, so the job summary states which
+    // engine produced the verdict rather than leaving "local" to stand for anything.
+    // --version writes to stderr in Enola and the enterprise wrapper does not implement
+    // --json, so both streams are searched and an unparsable banner is not fatal.
+    const check = await (0, exec_js_1.capture)(resolved, ["--version"], workspace, true);
+    if (check.exitCode !== 0)
+        throw new Error(`The binary input could not start: ${check.stderr.trim() || check.stdout.trim()}`);
+    const banner = `${check.stdout} ${check.stderr}`.trim();
+    const parsed = /version\s+(\S+)/i.exec(banner)?.[1];
+    return { path: resolved, version: parsed ? `${parsed} (local build)` : "local build" };
+}
+async function installEnola(requested, token) {
+    const version = requested === "latest" ? await latestVersion(token) : requested.replace(/^v/, "");
+    const cached = tc.find("enola", version);
+    const executable = process.platform === "win32" ? "enola.exe" : "enola";
+    if (cached)
+        return { path: node_path_1.default.join(cached, executable), version };
+    const target = platform();
+    const baseName = `enola-${version}-${target.os}-${target.arch}`;
+    const release = `https://github.com/enola-labs/enola/releases/download/v${version}`;
+    const archive = await tc.downloadTool(`${release}/${baseName}.tar.gz`);
+    const checksumFile = await tc.downloadTool(`${release}/${baseName}.sha256`);
+    const expected = (await node_fs_1.promises.readFile(checksumFile, "utf8")).trim().split(/\s+/)[0]?.toLowerCase();
+    const actual = await sha256(archive);
+    if (!expected || expected !== actual)
+        throw new Error(`Checksum mismatch for ${baseName}.tar.gz`);
+    const extracted = await tc.extractTar(archive);
+    const releasedBinary = node_path_1.default.join(extracted, `${baseName}${target.extension}`);
+    const installDirectory = await node_fs_1.promises.mkdtemp(node_path_1.default.join(process.env.RUNNER_TEMP || extracted, "enola-tool-"));
+    await node_fs_1.promises.copyFile(releasedBinary, node_path_1.default.join(installDirectory, executable));
+    if (process.platform !== "win32")
+        await node_fs_1.promises.chmod(node_path_1.default.join(installDirectory, executable), 0o755);
+    const cachedDirectory = await tc.cacheDir(installDirectory, "enola", version);
+    core.addPath(cachedDirectory);
+    const check = await (0, exec_js_1.capture)(node_path_1.default.join(cachedDirectory, executable), ["--version"], process.cwd(), true);
+    if (check.exitCode !== 0)
+        throw new Error(`Installed Enola could not start: ${check.stderr.trim()}`);
+    return { path: node_path_1.default.join(cachedDirectory, executable), version };
+}
+
+
+/***/ }),
+
+/***/ 6761:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.resolveRevisionContext = resolveRevisionContext;
+const ZERO_SHA = /^0+$/;
+function resolveRevisionContext(inputs, eventName, payload, sha) {
+    let baseSha = inputs.baseSha;
+    if (!baseSha && eventName === "pull_request") {
+        baseSha = payload.pull_request?.base?.sha;
+    }
+    else if (!baseSha && eventName === "push") {
+        baseSha = payload.before;
+    }
+    else if (!baseSha && eventName === "merge_group") {
+        baseSha = payload.merge_group?.base_sha;
+    }
+    if (!baseSha || ZERO_SHA.test(baseSha)) {
+        throw new Error(`No usable base commit for ${eventName || "this event"}. Set the base-sha input explicitly.`);
+    }
+    if (!sha)
+        throw new Error("GitHub did not provide a current commit SHA.");
+    return { baseSha, headSha: sha, eventName };
+}
+
+
+/***/ }),
+
+/***/ 5725:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -34406,394 +34608,7 @@ function checkArguments(inputs, baseline) {
 
 /***/ }),
 
-/***/ 232:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.useLocalEnola = useLocalEnola;
-exports.installEnola = installEnola;
-const core = __importStar(__nccwpck_require__(7484));
-const tc = __importStar(__nccwpck_require__(3472));
-const node_crypto_1 = __nccwpck_require__(7598);
-const node_fs_1 = __nccwpck_require__(3024);
-const node_path_1 = __importDefault(__nccwpck_require__(6760));
-const exec_js_1 = __nccwpck_require__(3190);
-function platform() {
-    const os = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
-    const arch = process.arch === "arm64" ? "arm64" : "amd64";
-    return { os, arch, extension: os === "windows" ? ".exe" : "" };
-}
-async function latestVersion(token) {
-    const headers = { Accept: "application/vnd.github+json" };
-    if (token)
-        headers.Authorization = `Bearer ${token}`;
-    const response = await fetch("https://api.github.com/repos/enola-labs/enola/releases/latest", { headers });
-    if (!response.ok)
-        throw new Error(`Unable to resolve latest Enola release: HTTP ${response.status}`);
-    const body = (await response.json());
-    if (!body.tag_name)
-        throw new Error("Latest Enola release has no tag name.");
-    return body.tag_name.replace(/^v/, "");
-}
-async function sha256(file) {
-    const hash = (0, node_crypto_1.createHash)("sha256");
-    hash.update(await node_fs_1.promises.readFile(file));
-    return hash.digest("hex");
-}
-// A locally built engine — the binary the pull request itself produces, or an enterprise
-// wrapper that is never published as an Enola release. It is graded through exactly the
-// same worktree/pin/check path as a downloaded release, so a repository that builds its
-// own engine no longer has to reimplement this workflow in shell.
-//
-// The caller supplies the executable, so there is nothing to verify a checksum against;
-// the trust boundary is the workflow that built it. Everything else is identical.
-async function useLocalEnola(binary, workspace) {
-    const resolved = node_path_1.default.isAbsolute(binary) ? binary : node_path_1.default.resolve(workspace, binary);
-    try {
-        await node_fs_1.promises.access(resolved, node_fs_1.constants.X_OK);
-    }
-    catch {
-        throw new Error(`The binary input does not point at an executable file: ${resolved}`);
-    }
-    // Report the version the way the download path does, so the job summary states which
-    // engine produced the verdict rather than leaving "local" to stand for anything.
-    // --version writes to stderr in Enola and the enterprise wrapper does not implement
-    // --json, so both streams are searched and an unparsable banner is not fatal.
-    const check = await (0, exec_js_1.capture)(resolved, ["--version"], workspace, true);
-    if (check.exitCode !== 0)
-        throw new Error(`The binary input could not start: ${check.stderr.trim() || check.stdout.trim()}`);
-    const banner = `${check.stdout} ${check.stderr}`.trim();
-    const parsed = /version\s+(\S+)/i.exec(banner)?.[1];
-    return { path: resolved, version: parsed ? `${parsed} (local build)` : "local build" };
-}
-async function installEnola(requested, token) {
-    const version = requested === "latest" ? await latestVersion(token) : requested.replace(/^v/, "");
-    const cached = tc.find("enola", version);
-    const executable = process.platform === "win32" ? "enola.exe" : "enola";
-    if (cached)
-        return { path: node_path_1.default.join(cached, executable), version };
-    const target = platform();
-    const baseName = `enola-${version}-${target.os}-${target.arch}`;
-    const release = `https://github.com/enola-labs/enola/releases/download/v${version}`;
-    const archive = await tc.downloadTool(`${release}/${baseName}.tar.gz`);
-    const checksumFile = await tc.downloadTool(`${release}/${baseName}.sha256`);
-    const expected = (await node_fs_1.promises.readFile(checksumFile, "utf8")).trim().split(/\s+/)[0]?.toLowerCase();
-    const actual = await sha256(archive);
-    if (!expected || expected !== actual)
-        throw new Error(`Checksum mismatch for ${baseName}.tar.gz`);
-    const extracted = await tc.extractTar(archive);
-    const releasedBinary = node_path_1.default.join(extracted, `${baseName}${target.extension}`);
-    const installDirectory = await node_fs_1.promises.mkdtemp(node_path_1.default.join(process.env.RUNNER_TEMP || extracted, "enola-tool-"));
-    await node_fs_1.promises.copyFile(releasedBinary, node_path_1.default.join(installDirectory, executable));
-    if (process.platform !== "win32")
-        await node_fs_1.promises.chmod(node_path_1.default.join(installDirectory, executable), 0o755);
-    const cachedDirectory = await tc.cacheDir(installDirectory, "enola", version);
-    core.addPath(cachedDirectory);
-    const check = await (0, exec_js_1.capture)(node_path_1.default.join(cachedDirectory, executable), ["--version"], process.cwd(), true);
-    if (check.exitCode !== 0)
-        throw new Error(`Installed Enola could not start: ${check.stderr.trim()}`);
-    return { path: node_path_1.default.join(cachedDirectory, executable), version };
-}
-
-
-/***/ }),
-
-/***/ 1730:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.run = run;
-const core = __importStar(__nccwpck_require__(7484));
-const node_fs_1 = __nccwpck_require__(3024);
-const node_path_1 = __importDefault(__nccwpck_require__(6760));
-const node_os_1 = __importDefault(__nccwpck_require__(8161));
-const annotations_js_1 = __nccwpck_require__(105);
-const context_js_1 = __nccwpck_require__(788);
-const exec_js_1 = __nccwpck_require__(3190);
-const git_js_1 = __nccwpck_require__(1243);
-const inputs_js_1 = __nccwpck_require__(8422);
-const install_js_1 = __nccwpck_require__(232);
-const summary_js_1 = __nccwpck_require__(8855);
-const verdict_js_1 = __nccwpck_require__(3138);
-async function run() {
-    const inputs = (0, inputs_js_1.readInputs)();
-    const eventName = process.env.GITHUB_EVENT_NAME || "";
-    const eventPath = process.env.GITHUB_EVENT_PATH;
-    const payload = eventPath ? JSON.parse(await node_fs_1.promises.readFile(eventPath, "utf8")) : {};
-    const revisions = (0, context_js_1.resolveRevisionContext)(inputs, eventName, payload, process.env.GITHUB_SHA || "");
-    const workspace = process.env.GITHUB_WORKSPACE;
-    if (!workspace)
-        throw new Error("GITHUB_WORKSPACE is not set.");
-    const headRoot = node_path_1.default.resolve(workspace);
-    const headDirectory = node_path_1.default.resolve(headRoot, inputs.workingDirectory);
-    if (!headDirectory.startsWith(`${headRoot}${node_path_1.default.sep}`) && headDirectory !== headRoot) {
-        throw new Error("working-directory must stay inside GITHUB_WORKSPACE.");
-    }
-    if (inputs.binary && inputs.version !== "latest") {
-        core.warning("Both binary and version were set; binary wins and the release is not downloaded.");
-    }
-    const installed = inputs.binary
-        ? await (0, install_js_1.useLocalEnola)(inputs.binary, headRoot)
-        : await (0, install_js_1.installEnola)(inputs.version, inputs.token);
-    core.info(`Using Enola ${installed.version}`);
-    await (0, git_js_1.ensureCommit)(headRoot, revisions.baseSha);
-    const temporaryRoot = await node_fs_1.promises.mkdtemp(node_path_1.default.join(process.env.RUNNER_TEMP || node_os_1.default.tmpdir(), "enola-action-"));
-    const baseRoot = node_path_1.default.join(temporaryRoot, "base");
-    const verdictFile = node_path_1.default.join(temporaryRoot, "verdict.json");
-    await (0, git_js_1.addWorktree)(headRoot, baseRoot, revisions.baseSha);
-    try {
-        const baseDirectory = node_path_1.default.resolve(baseRoot, inputs.workingDirectory);
-        const baseConfig = inputs.config ? node_path_1.default.resolve(baseRoot, inputs.config) : undefined;
-        const headConfig = inputs.config ? node_path_1.default.resolve(headRoot, inputs.config) : undefined;
-        const pinArgs = ["baseline", "pin"];
-        if (baseConfig)
-            pinArgs.push(baseConfig);
-        const pin = await (0, exec_js_1.capture)(installed.path, pinArgs, baseDirectory, true);
-        if (pin.exitCode !== 0)
-            throw new Error(`Unable to create base snapshot: ${pin.stderr.trim() || pin.stdout.trim()}`);
-        const baseline = node_path_1.default.join(baseDirectory, ".enola", "baseline");
-        const headInputs = { ...inputs, config: headConfig };
-        const result = await (0, exec_js_1.capture)(installed.path, (0, inputs_js_1.checkArguments)(headInputs, baseline), headDirectory, true);
-        let verdict;
-        try {
-            verdict = (0, verdict_js_1.parseVerdict)(result.stdout);
-        }
-        catch (error) {
-            throw new Error(`${error instanceof Error ? error.message : String(error)}\n${result.stderr.trim()}`.trim());
-        }
-        (0, verdict_js_1.assertExitCode)(verdict, result.exitCode);
-        await (0, verdict_js_1.saveVerdict)(verdictFile, result.stdout);
-        core.setOutput("status", verdict.status);
-        core.setOutput("regressions", (0, verdict_js_1.regressionCount)(verdict));
-        core.setOutput("advisories", (verdict.advisories || []).length);
-        core.setOutput("facts-added", verdict.facts_added);
-        core.setOutput("facts-removed", verdict.facts_removed);
-        core.setOutput("edges-added", verdict.edges_added);
-        core.setOutput("edges-removed", verdict.edges_removed);
-        core.setOutput("verdict-file", verdictFile);
-        (0, summary_js_1.logVerdict)(verdict);
-        if (inputs.annotations)
-            (0, annotations_js_1.annotate)(verdict);
-        if (inputs.summary)
-            await (0, summary_js_1.writeSummary)(verdict, revisions.baseSha, revisions.headSha, installed.version);
-        if (verdict.status !== "clean") {
-            core.setFailed(verdict.status === "regression"
-                ? `${(0, verdict_js_1.regressionCount)(verdict)} architectural regression(s) introduced.`
-                : verdict.status === "incomparable"
-                    ? "Enola refused to grade incomparable snapshots."
-                    : "Enola could not complete the architecture check.");
-        }
-    }
-    finally {
-        await (0, git_js_1.removeWorktree)(headRoot, baseRoot);
-    }
-}
-if (process.env.NODE_ENV !== "test") {
-    run().catch((error) => core.setFailed(error instanceof Error ? error.message : String(error)));
-}
-
-
-/***/ }),
-
-/***/ 8855:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.logVerdict = logVerdict;
-exports.writeSummary = writeSummary;
-const core = __importStar(__nccwpck_require__(7484));
-const verdict_js_1 = __nccwpck_require__(3138);
-function short(sha) {
-    return sha.slice(0, 8);
-}
-function breachList(breaches) {
-    return breaches
-        .map((breach) => `- **${breach.fatal ? "fail" : "warn"}** — ${breach.measurement.count} ${breach.measurement.label}`)
-        .join("\n");
-}
-function findingList(findings) {
-    return findings
-        .map((finding) => {
-        const at = finding.location || finding.evidence?.find((item) => item.file);
-        const place = at?.file ? ` — \`${at.file}${"line" in at && at.line ? `:${at.line}` : ""}\`` : "";
-        return `- **${finding.source || "architecture"} · ${finding.confidence.toFixed(2)}** — ${finding.title}${place}`;
-    })
-        .join("\n");
-}
-// The step log, not the job summary. A gate whose successful run prints nothing reads as
-// a gate that did not run — the verdict has to be visible where the work appears to happen.
-function logVerdict(verdict) {
-    const failures = verdict.failures || [];
-    const advisories = verdict.advisories || [];
-    core.info(`Verdict: ${verdict.status} — ${(0, verdict_js_1.regressionCount)(verdict)} regression(s), ${advisories.length} advisory, ` +
-        `${(verdict.resolved || []).length} resolved`);
-    for (const breach of verdict.breaches || []) {
-        const line = `${breach.measurement.count} ${breach.measurement.label}`;
-        if (breach.fatal)
-            core.info(`  Regression: ${line} (over threshold)`);
-        else
-            core.info(`  Warning: ${line} (over threshold)`);
-    }
-    core.info(`Delta: facts +${verdict.facts_added}/-${verdict.facts_removed}, ` +
-        `edges +${verdict.edges_added}/-${verdict.edges_removed}`);
-    for (const warning of verdict.comparability_warnings || [])
-        core.warning(warning);
-    for (const [label, findings] of [["Regression", failures], ["Advisory", advisories]]) {
-        for (const finding of findings) {
-            const at = finding.location || finding.evidence?.find((item) => item.file);
-            const place = at?.file ? ` (${at.file}${"line" in at && at.line ? `:${at.line}` : ""})` : "";
-            core.info(`  ${label}: ${finding.source || "architecture"} · ${finding.confidence.toFixed(2)} — ${finding.title}${place}`);
-        }
-    }
-}
-async function writeSummary(verdict, baseSha, headSha, version) {
-    const failures = verdict.failures || [];
-    const advisories = verdict.advisories || [];
-    const breaches = verdict.breaches || [];
-    // Counts breaches, not just findings: a spillover-only failure has no failing finding,
-    // and "0 structural regression(s) introduced" over a red job is worse than no summary.
-    const regressions = (0, verdict_js_1.regressionCount)(verdict);
-    const icon = verdict.status === "clean" ? "✅" : verdict.status === "regression" ? "❌" : "⚠️";
-    const title = verdict.status === "clean"
-        ? regressions ? `${regressions} regression(s) reported in warn-only mode` : "No structural regression"
-        : verdict.status === "regression" ? `${regressions} structural regression(s) introduced`
-            : verdict.status === "incomparable" ? "Enola refused to grade incomparable snapshots"
-                : "Enola could not complete the architecture check";
-    let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
-    markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
-    if (failures.length)
-        markdown += `## Regressions\n\n${findingList(failures)}\n\n`;
-    // Ahead of advisories: a fatal breach is why the job is red, and it must not sit below
-    // findings that did not fail it.
-    if (breaches.length)
-        markdown += `## Measurements over threshold\n\n${breachList(breaches)}\n\n`;
-    if (advisories.length)
-        markdown += `## Advisory findings\n\n${findingList(advisories)}\n\n`;
-    if (verdict.comparability_warnings?.length) {
-        markdown += `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
-    }
-    markdown += `## Architectural change\n\n| | Added | Removed |\n|---|---:|---:|\n`;
-    markdown += `| Facts | ${verdict.facts_added} | ${verdict.facts_removed} |\n`;
-    markdown += `| Edges | ${verdict.edges_added} | ${verdict.edges_removed} |\n`;
-    markdown += `| Findings | ${failures.length + advisories.length} | ${(verdict.resolved || []).length} |\n`;
-    await core.summary.addRaw(markdown).write();
-}
-
-
-/***/ }),
-
-/***/ 3138:
+/***/ 5187:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -34802,6 +34617,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseVerdict = parseVerdict;
 exports.fatalBreaches = fatalBreaches;
 exports.regressionCount = regressionCount;
+exports.enforcesNothing = enforcesNothing;
 exports.assertExitCode = assertExitCode;
 exports.saveVerdict = saveVerdict;
 const node_fs_1 = __nccwpck_require__(3024);
@@ -34844,6 +34660,19 @@ function fatalBreaches(verdict) {
 function regressionCount(verdict) {
     return (verdict.failures || []).length + fatalBreaches(verdict).length;
 }
+// Whether this run could have failed at all.
+//
+// Enola fails nothing unless a policy names it: no `fail-on`, no `max-spillover`, and
+// every finding is reported while the job stays green. That is a legitimate way to run
+// the action — a pull-request report rather than a gate — but it is indistinguishable
+// from a working gate if nobody says so, and a green check nobody configured is the
+// worst outcome this action has: it looks like protection and is not.
+function enforcesNothing(verdict) {
+    const policy = verdict.policy;
+    if (!policy)
+        return false; // An older Enola that does not report its policy.
+    return (policy.fail_explainers || []).length === 0 && (policy.thresholds || []).length === 0;
+}
 function assertExitCode(verdict, exitCode) {
     const expected = exitCodes[verdict.status];
     if (exitCode !== expected) {
@@ -34852,6 +34681,218 @@ function assertExitCode(verdict, exitCode) {
 }
 async function saveVerdict(file, raw) {
     await node_fs_1.promises.writeFile(file, `${raw.trim()}\n`, "utf8");
+}
+
+
+/***/ }),
+
+/***/ 856:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.annotate = annotate;
+const core = __importStar(__nccwpck_require__(7484));
+const LIMIT = 10;
+function location(finding) {
+    if (finding.location?.file)
+        return finding.location;
+    const evidence = finding.evidence?.find((item) => item.file);
+    return evidence?.file ? { file: evidence.file } : undefined;
+}
+function properties(finding) {
+    const at = location(finding);
+    return {
+        title: `Enola: ${finding.source || "architecture"}`,
+        file: at?.file,
+        startLine: at?.line,
+        endLine: at?.end_line || at?.line,
+    };
+}
+function message(finding) {
+    return `${finding.title} (confidence ${finding.confidence.toFixed(2)})`;
+}
+function annotate(verdict) {
+    for (const finding of (verdict.failures || []).slice(0, LIMIT)) {
+        core.error(message(finding), properties(finding));
+    }
+    for (const finding of (verdict.advisories || []).slice(0, LIMIT)) {
+        core.warning(message(finding), properties(finding));
+    }
+    if (verdict.status === "incomparable") {
+        core.error(`Enola refused to grade this change: ${(verdict.comparability_warnings || []).join("; ") || "snapshots are not comparable"}`);
+    }
+}
+
+
+/***/ }),
+
+/***/ 7994:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.logVerdict = logVerdict;
+exports.writeSummary = writeSummary;
+const core = __importStar(__nccwpck_require__(7484));
+const verdict_js_1 = __nccwpck_require__(5187);
+function short(sha) {
+    return sha.slice(0, 8);
+}
+function breachList(breaches) {
+    return breaches
+        .map((breach) => `- **${breach.fatal ? "fail" : "warn"}** — ${breach.measurement.count} ${breach.measurement.label}`)
+        .join("\n");
+}
+function findingList(findings) {
+    return findings
+        .map((finding) => {
+        const at = finding.location || finding.evidence?.find((item) => item.file);
+        const place = at?.file ? ` — \`${at.file}${"line" in at && at.line ? `:${at.line}` : ""}\`` : "";
+        return `- **${finding.source || "architecture"} · ${finding.confidence.toFixed(2)}** — ${finding.title}${place}`;
+    })
+        .join("\n");
+}
+// The step log, not the job summary. A gate whose successful run prints nothing reads as
+// a gate that did not run — the verdict has to be visible where the work appears to happen.
+function logVerdict(verdict) {
+    const failures = verdict.failures || [];
+    const advisories = verdict.advisories || [];
+    core.info(`Verdict: ${verdict.status} — ${(0, verdict_js_1.regressionCount)(verdict)} regression(s), ${advisories.length} advisory, ` +
+        `${(verdict.resolved || []).length} resolved`);
+    for (const breach of verdict.breaches || []) {
+        const line = `${breach.measurement.count} ${breach.measurement.label}`;
+        if (breach.fatal)
+            core.info(`  Regression: ${line} (over threshold)`);
+        else
+            core.info(`  Warning: ${line} (over threshold)`);
+    }
+    core.info(`Delta: facts +${verdict.facts_added}/-${verdict.facts_removed}, ` +
+        `edges +${verdict.edges_added}/-${verdict.edges_removed}`);
+    for (const warning of verdict.comparability_warnings || [])
+        core.warning(warning);
+    // Loud, and a warning rather than an info line: this run had no grounds to fail, so a
+    // green check on it means "not graded", not "graded clean".
+    if ((0, verdict_js_1.enforcesNothing)(verdict)) {
+        core.warning("No policy is set, so nothing in this run could fail the job. Enola reported " +
+            `${(verdict.advisories || []).length} finding(s) and exited clean. Set fail-on ` +
+            "(e.g. fail-on: layers) or max-spillover to make this a gate.");
+    }
+    for (const [label, findings] of [["Regression", failures], ["Advisory", advisories]]) {
+        for (const finding of findings) {
+            const at = finding.location || finding.evidence?.find((item) => item.file);
+            const place = at?.file ? ` (${at.file}${"line" in at && at.line ? `:${at.line}` : ""})` : "";
+            core.info(`  ${label}: ${finding.source || "architecture"} · ${finding.confidence.toFixed(2)} — ${finding.title}${place}`);
+        }
+    }
+}
+async function writeSummary(verdict, baseSha, headSha, version) {
+    const failures = verdict.failures || [];
+    const advisories = verdict.advisories || [];
+    const breaches = verdict.breaches || [];
+    // Counts breaches, not just findings: a spillover-only failure has no failing finding,
+    // and "0 structural regression(s) introduced" over a red job is worse than no summary.
+    const regressions = (0, verdict_js_1.regressionCount)(verdict);
+    const icon = verdict.status === "clean" ? "✅" : verdict.status === "regression" ? "❌" : "⚠️";
+    const unenforced = (0, verdict_js_1.enforcesNothing)(verdict);
+    const title = verdict.status === "clean"
+        ? regressions ? `${regressions} regression(s) reported in warn-only mode`
+            : unenforced && advisories.length ? `${advisories.length} finding(s) reported, nothing enforced`
+                : "No structural regression"
+        : verdict.status === "regression" ? `${regressions} structural regression(s) introduced`
+            : verdict.status === "incomparable" ? "Enola refused to grade incomparable snapshots"
+                : "Enola could not complete the architecture check";
+    let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
+    markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
+    if (unenforced) {
+        markdown += "> **No policy set.** Nothing in this run could fail the job — every finding below is a " +
+            "report. Set `fail-on` (e.g. `fail-on: layers`) or `max-spillover` to make this a gate.\n\n";
+    }
+    if (failures.length)
+        markdown += `## Regressions\n\n${findingList(failures)}\n\n`;
+    // Ahead of advisories: a fatal breach is why the job is red, and it must not sit below
+    // findings that did not fail it.
+    if (breaches.length)
+        markdown += `## Measurements over threshold\n\n${breachList(breaches)}\n\n`;
+    if (advisories.length) {
+        markdown += `## ${unenforced ? "Findings (reported, not enforced)" : "Advisory findings"}\n\n${findingList(advisories)}\n\n`;
+    }
+    if (verdict.comparability_warnings?.length) {
+        markdown += `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
+    }
+    markdown += `## Architectural change\n\n| | Added | Removed |\n|---|---:|---:|\n`;
+    markdown += `| Facts | ${verdict.facts_added} | ${verdict.facts_removed} |\n`;
+    markdown += `| Edges | ${verdict.edges_added} | ${verdict.edges_removed} |\n`;
+    markdown += `| Findings | ${failures.length + advisories.length} | ${(verdict.resolved || []).length} |\n`;
+    await core.summary.addRaw(markdown).write();
 }
 
 
