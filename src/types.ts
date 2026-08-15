@@ -37,10 +37,21 @@ export interface Breach {
   fatal?: boolean;
 }
 
+// The policy Enola actually enforced, as it reports it back — not what the workflow
+// asked for. Reading it from the verdict is what lets the action say "nothing was
+// enforced" without re-deriving the rule from inputs and getting it wrong.
+export interface Policy {
+  fail_explainers?: string[] | null;
+  min_confidence?: number;
+  warn_only?: boolean;
+  thresholds?: unknown[];
+}
+
 export interface Verdict {
   schema_version?: number;
   tool?: { name: string; version: string };
   status: VerdictStatus;
+  policy?: Policy;
   failures?: Finding[];
   advisories?: Finding[];
   resolved?: Finding[];

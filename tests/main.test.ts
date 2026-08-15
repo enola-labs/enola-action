@@ -180,3 +180,42 @@ describe("run", () => {
     expect(git.removeWorktree).toHaveBeenCalled();
   });
 });
+
+describe("the base worktree's directory name", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.assign(process.env, baseEnv);
+    fsMock.readFile.mockResolvedValue("{}");
+    fsMock.mkdtemp.mockResolvedValue("/tmp/enola-action-xyz");
+    contextModule.resolveRevisionContext.mockReturnValue({
+      baseSha: "basesha",
+      headSha: "headsha",
+      eventName: "pull_request",
+    });
+    install.installEnola.mockResolvedValue({ path: "/bin/enola", version: "1.2.3" });
+    inputsModule.readInputs.mockReturnValue(defaultInputs());
+    capture
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: JSON.stringify({ status: "clean" }), stderr: "" });
+    verdictModule.parseVerdict.mockReturnValue({
+      status: "clean",
+      failures: [],
+      advisories: [],
+      edges_added: 0,
+      edges_removed: 0,
+      facts_added: 0,
+      facts_removed: 0,
+    });
+  });
+
+  // Enola labels each fact with the indexed directory's basename, and that label is part
+  // of the key a diff matches on. A worktree named anything other than the workspace
+  // makes every fact in the base snapshot unmatchable, and the delta reports the whole
+  // repository as added and removed — while the verdict still looks plausible, because
+  // findings are keyed by title rather than by repo.
+  it("matches the workspace, so base and head facts share a repository label", async () => {
+    await run();
+    const [, worktreePath] = git.addWorktree.mock.calls[0];
+    expect(worktreePath).toBe("/tmp/enola-action-xyz/workspace");
+  });
+});

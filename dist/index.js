@@ -34614,7 +34614,19 @@ async function run() {
     core.info(`Using Enola ${installed.version}`);
     await (0, git_js_1.ensureCommit)(headRoot, revisions.baseSha);
     const temporaryRoot = await node_fs_1.promises.mkdtemp(node_path_1.default.join(process.env.RUNNER_TEMP || node_os_1.default.tmpdir(), "enola-action-"));
-    const baseRoot = node_path_1.default.join(temporaryRoot, "base");
+    // The base worktree MUST carry the same directory name as the head checkout.
+    //
+    // Enola labels every fact with the repository it came from, and that label is the
+    // indexed directory's basename. A worktree called "base" therefore produces facts
+    // labelled `base` while the workspace produces `enola` — different keys for the same
+    // code, so a diff between them reports the entire graph as added and removed. The
+    // comparability check does not catch it: it identifies a repository by its normalized
+    // git remote, which a linked worktree shares, so the gate grades a delta that is
+    // meaningless rather than declining to.
+    //
+    // Findings survive it (they are keyed by title, not by repo), which is exactly why
+    // this stayed invisible: the verdict looked right while every count under it was wrong.
+    const baseRoot = node_path_1.default.join(temporaryRoot, node_path_1.default.basename(headRoot));
     const verdictFile = node_path_1.default.join(temporaryRoot, "verdict.json");
     await (0, git_js_1.addWorktree)(headRoot, baseRoot, revisions.baseSha);
     try {
@@ -34749,6 +34761,13 @@ function logVerdict(verdict) {
         `edges +${verdict.edges_added}/-${verdict.edges_removed}`);
     for (const warning of verdict.comparability_warnings || [])
         core.warning(warning);
+    // Loud, and a warning rather than an info line: this run had no grounds to fail, so a
+    // green check on it means "not graded", not "graded clean".
+    if ((0, verdict_js_1.enforcesNothing)(verdict)) {
+        core.warning("No policy is set, so nothing in this run could fail the job. Enola reported " +
+            `${(verdict.advisories || []).length} finding(s) and exited clean. Set fail-on ` +
+            "(e.g. fail-on: layers) or max-spillover to make this a gate.");
+    }
     for (const [label, findings] of [["Regression", failures], ["Advisory", advisories]]) {
         for (const finding of findings) {
             const at = finding.location || finding.evidence?.find((item) => item.file);
@@ -34765,21 +34784,29 @@ async function writeSummary(verdict, baseSha, headSha, version) {
     // and "0 structural regression(s) introduced" over a red job is worse than no summary.
     const regressions = (0, verdict_js_1.regressionCount)(verdict);
     const icon = verdict.status === "clean" ? "✅" : verdict.status === "regression" ? "❌" : "⚠️";
+    const unenforced = (0, verdict_js_1.enforcesNothing)(verdict);
     const title = verdict.status === "clean"
-        ? regressions ? `${regressions} regression(s) reported in warn-only mode` : "No structural regression"
+        ? regressions ? `${regressions} regression(s) reported in warn-only mode`
+            : unenforced && advisories.length ? `${advisories.length} finding(s) reported, nothing enforced`
+                : "No structural regression"
         : verdict.status === "regression" ? `${regressions} structural regression(s) introduced`
             : verdict.status === "incomparable" ? "Enola refused to grade incomparable snapshots"
                 : "Enola could not complete the architecture check";
     let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
     markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
+    if (unenforced) {
+        markdown += "> **No policy set.** Nothing in this run could fail the job — every finding below is a " +
+            "report. Set `fail-on` (e.g. `fail-on: layers`) or `max-spillover` to make this a gate.\n\n";
+    }
     if (failures.length)
         markdown += `## Regressions\n\n${findingList(failures)}\n\n`;
     // Ahead of advisories: a fatal breach is why the job is red, and it must not sit below
     // findings that did not fail it.
     if (breaches.length)
         markdown += `## Measurements over threshold\n\n${breachList(breaches)}\n\n`;
-    if (advisories.length)
-        markdown += `## Advisory findings\n\n${findingList(advisories)}\n\n`;
+    if (advisories.length) {
+        markdown += `## ${unenforced ? "Findings (reported, not enforced)" : "Advisory findings"}\n\n${findingList(advisories)}\n\n`;
+    }
     if (verdict.comparability_warnings?.length) {
         markdown += `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
     }
@@ -34802,6 +34829,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseVerdict = parseVerdict;
 exports.fatalBreaches = fatalBreaches;
 exports.regressionCount = regressionCount;
+exports.enforcesNothing = enforcesNothing;
 exports.assertExitCode = assertExitCode;
 exports.saveVerdict = saveVerdict;
 const node_fs_1 = __nccwpck_require__(3024);
@@ -34843,6 +34871,19 @@ function fatalBreaches(verdict) {
 // counts breaches to avoid. Every surface that reports a count reads this.
 function regressionCount(verdict) {
     return (verdict.failures || []).length + fatalBreaches(verdict).length;
+}
+// Whether this run could have failed at all.
+//
+// Enola fails nothing unless a policy names it: no `fail-on`, no `max-spillover`, and
+// every finding is reported while the job stays green. That is a legitimate way to run
+// the action — a pull-request report rather than a gate — but it is indistinguishable
+// from a working gate if nobody says so, and a green check nobody configured is the
+// worst outcome this action has: it looks like protection and is not.
+function enforcesNothing(verdict) {
+    const policy = verdict.policy;
+    if (!policy)
+        return false; // An older Enola that does not report its policy.
+    return (policy.fail_explainers || []).length === 0 && (policy.thresholds || []).length === 0;
 }
 function assertExitCode(verdict, exitCode) {
     const expected = exitCodes[verdict.status];

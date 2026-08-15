@@ -36,7 +36,19 @@ export async function run(): Promise<void> {
   await ensureCommit(headRoot, revisions.baseSha);
 
   const temporaryRoot = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || os.tmpdir(), "enola-action-"));
-  const baseRoot = path.join(temporaryRoot, "base");
+  // The base worktree MUST carry the same directory name as the head checkout.
+  //
+  // Enola labels every fact with the repository it came from, and that label is the
+  // indexed directory's basename. A worktree called "base" therefore produces facts
+  // labelled `base` while the workspace produces `enola` — different keys for the same
+  // code, so a diff between them reports the entire graph as added and removed. The
+  // comparability check does not catch it: it identifies a repository by its normalized
+  // git remote, which a linked worktree shares, so the gate grades a delta that is
+  // meaningless rather than declining to.
+  //
+  // Findings survive it (they are keyed by title, not by repo), which is exactly why
+  // this stayed invisible: the verdict looked right while every count under it was wrong.
+  const baseRoot = path.join(temporaryRoot, path.basename(headRoot));
   const verdictFile = path.join(temporaryRoot, "verdict.json");
   await addWorktree(headRoot, baseRoot, revisions.baseSha);
 

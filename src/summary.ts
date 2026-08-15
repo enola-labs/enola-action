@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import { Breach, Finding, Verdict } from "./types.js";
-import { fatalBreaches, regressionCount } from "./verdict.js";
+import { enforcesNothing, fatalBreaches, regressionCount } from "./verdict.js";
 
 function short(sha: string): string {
   return sha.slice(0, 8);
@@ -41,6 +41,15 @@ export function logVerdict(verdict: Verdict): void {
       `edges +${verdict.edges_added}/-${verdict.edges_removed}`,
   );
   for (const warning of verdict.comparability_warnings || []) core.warning(warning);
+  // Loud, and a warning rather than an info line: this run had no grounds to fail, so a
+  // green check on it means "not graded", not "graded clean".
+  if (enforcesNothing(verdict)) {
+    core.warning(
+      "No policy is set, so nothing in this run could fail the job. Enola reported " +
+        `${(verdict.advisories || []).length} finding(s) and exited clean. Set fail-on ` +
+        "(e.g. fail-on: layers) or max-spillover to make this a gate.",
+    );
+  }
   for (const [label, findings] of [["Regression", failures], ["Advisory", advisories]] as const) {
     for (const finding of findings) {
       const at = finding.location || finding.evidence?.find((item) => item.file);
@@ -58,19 +67,28 @@ export async function writeSummary(verdict: Verdict, baseSha: string, headSha: s
   // and "0 structural regression(s) introduced" over a red job is worse than no summary.
   const regressions = regressionCount(verdict);
   const icon = verdict.status === "clean" ? "✅" : verdict.status === "regression" ? "❌" : "⚠️";
+  const unenforced = enforcesNothing(verdict);
   const title = verdict.status === "clean"
-    ? regressions ? `${regressions} regression(s) reported in warn-only mode` : "No structural regression"
+    ? regressions ? `${regressions} regression(s) reported in warn-only mode`
+      : unenforced && advisories.length ? `${advisories.length} finding(s) reported, nothing enforced`
+      : "No structural regression"
     : verdict.status === "regression" ? `${regressions} structural regression(s) introduced`
     : verdict.status === "incomparable" ? "Enola refused to grade incomparable snapshots"
     : "Enola could not complete the architecture check";
 
   let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
   markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
+  if (unenforced) {
+    markdown += "> **No policy set.** Nothing in this run could fail the job — every finding below is a " +
+      "report. Set `fail-on` (e.g. `fail-on: layers`) or `max-spillover` to make this a gate.\n\n";
+  }
   if (failures.length) markdown += `## Regressions\n\n${findingList(failures)}\n\n`;
   // Ahead of advisories: a fatal breach is why the job is red, and it must not sit below
   // findings that did not fail it.
   if (breaches.length) markdown += `## Measurements over threshold\n\n${breachList(breaches)}\n\n`;
-  if (advisories.length) markdown += `## Advisory findings\n\n${findingList(advisories)}\n\n`;
+  if (advisories.length) {
+    markdown += `## ${unenforced ? "Findings (reported, not enforced)" : "Advisory findings"}\n\n${findingList(advisories)}\n\n`;
+  }
   if (verdict.comparability_warnings?.length) {
     markdown += `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
   }

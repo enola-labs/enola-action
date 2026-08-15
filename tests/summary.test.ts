@@ -54,3 +54,48 @@ describe("writeSummary", () => {
     expect(markdown).toContain("- no shared baseline");
   });
 });
+
+describe("an unenforced run", () => {
+  // The failure mode this guards: a workflow with no fail-on set is a report, and a
+  // green check on it must not read as "graded clean". Both surfaces have to say so.
+  it("marks the summary as enforcing nothing and relabels the findings section", async () => {
+    await writeSummary(
+      verdict({
+        policy: { fail_explainers: [], min_confidence: 1, thresholds: [] },
+        advisories: [{ title: "Layer violation: storage -> delivery", source: "layers", confidence: 1 }],
+      }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("1 finding(s) reported, nothing enforced");
+    expect(markdown).toContain("No policy set.");
+    expect(markdown).toContain("Findings (reported, not enforced)");
+    expect(markdown).not.toContain("## Advisory findings");
+  });
+
+  it("says nothing of the sort when a policy is set", async () => {
+    await writeSummary(
+      verdict({
+        policy: { fail_explainers: ["layers"], min_confidence: 1 },
+        advisories: [{ title: "Call-graph hotspot", source: "hotspots", confidence: 0.7 }],
+      }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("## Advisory findings");
+    expect(markdown).not.toContain("No policy set.");
+  });
+
+  // An Enola old enough not to report its policy must not be described as ungated —
+  // that build fails on cycles by default, and claiming otherwise would be a lie about
+  // a run this action did not configure.
+  it("stays silent when the verdict carries no policy at all", async () => {
+    await writeSummary(verdict({ advisories: [{ title: "x", source: "layers", confidence: 1 }] }), "base", "head", "1.2.3");
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).not.toContain("No policy set.");
+  });
+});
