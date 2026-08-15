@@ -22,13 +22,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: enola-labs/enola-action@v1
+      - uses: enola-labs/enola-action@v2
 ```
 
 With no inputs, **nothing fails the job**. Enola runs all eleven of its checks - it calls them **explainers** - reports everything they find on the pull request, and stays green: the workflow above is a report, and the summary says so in as many words. One input turns it into a gate:
 
 ```yaml
-      - uses: enola-labs/enola-action@v1
+      - uses: enola-labs/enola-action@v2
         with:
           fail-on: layers      # …or cycles, intent, or any of the eleven
 ```
@@ -99,7 +99,7 @@ Three traps worth knowing before you set `fail-on`:
 Every input is optional. The workflow above is the whole setup.
 
 ```yaml
-- uses: enola-labs/enola-action@v1
+- uses: enola-labs/enola-action@v2
   with:
     # Explainers whose new findings fail the job. WITHOUT THIS INPUT NOTHING FAILS.
     # Any of: cycles, layers, intent, crossrepo, coverage, unused-routes, god-class,
@@ -155,7 +155,7 @@ Set `binary` to grade with an engine the workflow builds itself, instead of a pu
 
 ```yaml
 - run: go build -o /tmp/enola ./cmd/enola
-- uses: enola-labs/enola-action@v1
+- uses: enola-labs/enola-action@v2
   with:
     binary: /tmp/enola
     warn-only: "true"
