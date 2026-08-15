@@ -19,7 +19,7 @@
     "@types/node": "^22.10.2",
     "@vercel/ncc": "^0.38.3",
     "prettier": "^3.4.2",
-    "typescript": "^5.7.2",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
   "engines": {
