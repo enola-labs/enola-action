@@ -25,12 +25,12 @@ jobs:
       - uses: enola-labs/enola-action@v2
 ```
 
-With no inputs, **nothing fails the job**. Enola runs all eleven of its checks - it calls them **explainers** - reports everything they find on the pull request, and stays green: the workflow above is a report, and the summary says so in as many words. One input turns it into a gate:
+With no inputs, **nothing fails the job**. Enola runs all fifteen of its checks - it calls them **explainers** - reports everything they find on the pull request, and stays green: the workflow above is a report, and the summary says so in as many words. One input turns it into a gate:
 
 ```yaml
       - uses: enola-labs/enola-action@v2
         with:
-          fail-on: layers      # …or cycles, intent, or any of the eleven
+          fail-on: layers      # …or cycles, intent, constraints, or any of the fifteen
 ```
 
 That is deliberate. What counts as an architectural regression is a decision about *your* codebase - a dependency cycle is a defect in one repository and ordinary practice in the next - so the action never picks one for you. See [what fails the job](#what-fails-the-job).
@@ -49,14 +49,15 @@ Two separate things decide that: what Enola **finds**, and what your inputs **fa
 | `max-spillover` | fails when the change reached more than N packages outside the `target` you declared. This is not a finding, and it can fail a job whose findings are all clean |
 | `warn-only` | downgrades findings and spillover breaches to warnings. It does **not** suppress a check that could not run: a missing base still fails, and an incomparable base still makes Enola decline to grade |
 
-**`fail-on` accepts all eleven explainer names**, not just the two or three that show up in most examples. Each row below is a real value you can paste into `with:`:
+**`fail-on` accepts all fifteen explainer names**, not just the two or three that show up in most examples. A name Enola does not recognise stops the run and says so, rather than matching nothing: matching is exact, so `CYCLES` is not `cycles`, and a list mixing valid and invalid names is refused whole. The `verdict-file` output holds the policy that actually ran. Each row below is a real value you can paste into `with:`:
 
 | You want | Set |
 |---|---|
 | The default: report everything, fail nothing | *omit `fail-on` entirely* |
 | Fail on a layer order you declared being crossed the wrong way | `fail-on: layers` |
 | Also fail on an undeclared cross-repo seam, and on new cycles | `fail-on: layers,intent,cycles` |
-| Everything Enola proves, plus the eight it infers | `fail-on: layers,intent,cycles,crossrepo,coverage,unused-routes,god-class,hotspots,dependency-depth,exported-surface,complexity-outliers` **and** `min-confidence: "0.8"` |
+| Fail on a breach of an architecture rule you declared in `enola/constraints/` | `fail-on: constraints` |
+| Everything Enola proves, plus the eleven it infers | `fail-on: layers,intent,cycles,constraints,crossrepo,coverage,unused-routes,god-class,hotspots,dependency-depth,exported-surface,complexity-outliers,domain,query-loops,entry-points` **and** `min-confidence: "0.8"` |
 | Enforce a policy, but only warn on this branch | `fail-on: layers` **and** `warn-only: "true"` |
 | Fail if the change spread outside the area you named | `target: internal/auth` **and** `max-spillover: "0"` |
 
@@ -88,11 +89,10 @@ A failing run, with `fail-on: layers`. The job summary, verbatim:
 
 The same finding also lands on `storage/storage.go` as a source annotation, so it shows up in the **Files changed** tab next to the import that caused it. Without `fail-on: layers` the identical finding appears under **Findings (reported, not enforced)**, annotates as a warning, and the job passes.
 
-Three traps worth knowing before you set `fail-on`:
+Two traps worth knowing before you set `fail-on`:
 
 - **No `fail-on` means no gate.** A workflow that sets neither `fail-on` nor `max-spillover` cannot fail, whatever Enola finds. The action emits a job warning and a summary notice on every such run rather than letting a green check speak for itself, but a required status check configured on it is protecting nothing.
-- **A misspelled name is not an error.** It matches nothing, so the gate quietly stops enforcing what you thought you asked for. The `verdict-file` output holds the policy that actually ran.
-- **Naming an explainer is not always enough, because the floor applies per finding.** Only three of the eleven ever reach `1.00`: `cycles`, `intent`, and `layers` when the layer order is *declared* in `enola-intent.yaml`. Everything else is inferred rather than proven and is capped at `0.95` by design, so it cannot fail at the default floor no matter what you put in `fail-on`. Naming any of the other eight is a no-op until you also lower `min-confidence`.
+- **Naming an explainer is not always enough, because the floor applies per finding.** Only four of the fifteen ever reach `1.00`: `cycles`, `intent`, `constraints` for a rule in enforcing mode, and `layers` when the layer order is *declared* in `enola-intent.yaml`. Everything else is inferred rather than proven and is capped at `0.95` by design, so it cannot fail at the default floor no matter what you put in `fail-on`. Naming any of the other eleven is a no-op until you also lower `min-confidence`.
 
 ## Configuration
 
