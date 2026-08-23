@@ -32,7 +32,7 @@ inputs:
     description: Narrow the delta to this module, file, or symbol
     required: false
   detail:
-    description: Include the complete structural delta in the summary
+    description: Include the complete structural delta in the job summary
     default: "false"
   target:
     description: Symbol, type, or package intended to change
@@ -49,6 +49,11 @@ inputs:
   annotations:
     description: Emit source annotations
     default: "true"
+  sarif:
+    description: >-
+      Write the findings as a SARIF 2.1.0 file and expose its path as the sarif-file
+      output, for upload to GitHub code scanning.
+    default: "false"
   summary:
     description: Write the GitHub job summary
     default: "true"
@@ -61,7 +66,13 @@ inputs:
 
 outputs:
   status:
-    description: clean, regression, usage_error, or incomparable
+    description: >-
+      clean, partial_clean, regression, partial_regression, usage_error, or incomparable.
+      The partial_ forms mean Enola graded only the producers both snapshots share,
+      because the two were produced by different extractor or provider sets. They pass
+      and fail exactly as their whole-verdict counterparts do.
+  partial:
+    description: true when the verdict graded only the shared producer set
   regressions:
     description: >-
       Number of failing findings plus fatal measurement breaches, i.e. everything that
@@ -76,8 +87,14 @@ outputs:
     description: Edges added by the change
   edges-removed:
     description: Edges removed by the change
+  ungraded-facts:
+    description: Facts a partial verdict could not grade, across every excluded producer
+  ungraded-findings:
+    description: Findings a partial verdict could not grade, across every excluded producer
   verdict-file:
     description: Path to the complete JSON verdict
+  sarif-file:
+    description: Path to the SARIF file, when the sarif input is set
 
 runs:
   using: node24

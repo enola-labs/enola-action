@@ -1,0 +1,53 @@
+{
+  "status": "partial_clean",
+  "policy": {
+    "fail_explainers": null,
+    "min_confidence": 1,
+    "warn_only": false
+  },
+  "intersection_grading": {
+    "shared_extractors": [
+      "typescript"
+    ],
+    "excluded": [
+      {
+        "name": "ruby",
+        "kind": "extractor",
+        "lacked_by": "baseline",
+        "baseline_facts_excluded": 0,
+        "current_facts_excluded": 2,
+        "baseline_findings_excluded": 0,
+        "current_findings_excluded": 1
+      }
+    ]
+  },
+  "edges_added": 0,
+  "edges_removed": 0,
+  "facts_added": 1,
+  "facts_removed": 0,
+  "facts_changed": 0,
+  "added_by_kind": {
+    "module": 1
+  },
+  "diff": {
+    "baseline_repo": "/tmp/enola-fixture/example-app",
+    "current_repo": "/tmp/enola-fixture/example-app",
+    "baseline_generated_at": "2026-08-23T20:18:21Z",
+    "current_generated_at": "2026-08-23T20:18:21Z",
+    "comparability": {
+      "comparable": true
+    },
+    "facts_added": [
+      {
+        "kind": "module",
+        "name": "lib",
+        "file": "lib",
+        "repo": "example-app",
+        "props": {
+          "language": "ruby",
+          "module_role": "unknown"
+        }
+      }
+    ]
+  }
+}

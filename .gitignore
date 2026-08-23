@@ -7,3 +7,7 @@ coverage/
 # `require('./sourcemap-register.js')` prologue, and ignoring that file here shipped a
 # bundle that could not load at all (MODULE_NOT_FOUND on every consumer's runner).
 dist/*.map
+
+# Enola's own output directory: snapshots, the extractor cache, a pinned baseline. Written
+# whenever the engine is run against this repository, and never part of the action.
+.enola/

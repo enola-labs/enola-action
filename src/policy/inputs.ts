@@ -20,19 +20,26 @@ export function readInputs(): Inputs {
     maxSpillover: optional("max-spillover"),
     baseSha: optional("base-sha"),
     annotations: core.getBooleanInput("annotations"),
+    sarif: core.getBooleanInput("sarif"),
     summary: core.getBooleanInput("summary"),
     workingDirectory: core.getInput("working-directory").trim() || ".",
     token: optional("token"),
   };
 }
 
+// The `enola check` invocation. One run, one format: the JSON verdict, which is what the
+// outputs, the summary, the annotations and the SARIF file are all rendered from.
+//
+// `--detail` is deliberately NOT passed. Enola honours it only when it is writing text —
+// the JSON document always carries the whole delta — so passing it alongside `--json`
+// changed nothing at all, which is what the `detail` input used to do. The input now
+// renders that delta into the job summary instead.
 export function checkArguments(inputs: Inputs, baseline: string): string[] {
   const args = ["check", "--baseline", baseline, "--json"];
   if (inputs.failOn) args.push("--fail-on", inputs.failOn);
   if (inputs.minConfidence) args.push("--min-confidence", inputs.minConfidence);
   if (inputs.warnOnly) args.push("--warn-only");
   if (inputs.focus) args.push("--focus", inputs.focus);
-  if (inputs.detail) args.push("--detail");
   if (inputs.target) args.push("--target", inputs.target);
   if (inputs.expected) args.push("--expected", inputs.expected);
   if (inputs.maxSpillover) args.push("--max-spillover", inputs.maxSpillover);

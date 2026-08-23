@@ -25,12 +25,12 @@ jobs:
       - uses: enola-labs/enola-action@v2
 ```
 
-With no inputs, **nothing fails the job**. Enola runs all seventeen of its checks - it calls them **explainers** - reports everything they find on the pull request, and stays green: the workflow above is a report, and the summary says so in as many words. One input turns it into a gate:
+With no inputs, **nothing fails the job**. Enola runs all eighteen of its checks - it calls them **explainers** - reports everything they find on the pull request, and stays green: the workflow above is a report, and the summary says so in as many words. One input turns it into a gate:
 
 ```yaml
       - uses: enola-labs/enola-action@v2
         with:
-          fail-on: layers      # …or cycles, intent, constraints, or any of the seventeen
+          fail-on: layers      # …or cycles, intent, constraints, or any of the eighteen
 ```
 
 That is deliberate. What counts as an architectural regression is a decision about *your* codebase - a dependency cycle is a defect in one repository and ordinary practice in the next - so the action never picks one for you. See [what fails the job](#what-fails-the-job).
@@ -47,9 +47,9 @@ Two separate things decide that: what Enola **finds**, and what your inputs **fa
 | `fail-on` | the policy. `fail-on: layers` fails on new layer violations; `fail-on: cycles,layers` on both |
 | `min-confidence` | **lowers** the floor within those explainers. The default is `1.00`, already the strictest value; `0.8` makes the job fail on *more*, not less |
 | `max-spillover` | fails when the change reached more than N packages outside the `target` you declared. This is not a finding, and it can fail a job whose findings are all clean |
-| `warn-only` | downgrades findings and spillover breaches to warnings. It does **not** suppress a check that could not run: a missing base still fails, and an incomparable base still makes Enola decline to grade |
+| `warn-only` | downgrades findings and spillover breaches to warnings. It does **not** suppress a check that could not run: a missing base still fails, and a base Enola cannot compare against at all still makes it decline to grade (a base that differs only in *who produced the facts* is graded partially instead - see [below](#when-enola-grades-only-part-of-the-graph)) |
 
-**`fail-on` accepts all seventeen explainer names**, not just the two or three that show up in most examples. A name Enola does not recognise stops the run and says so, rather than matching nothing: matching is exact, so `CYCLES` is not `cycles`, and a list mixing valid and invalid names is refused whole. The `verdict-file` output holds the policy that actually ran. Each row below is a real value you can paste into `with:`:
+**`fail-on` accepts all eighteen explainer names**, not just the two or three that show up in most examples. A name Enola does not recognise stops the run and says so, rather than matching nothing: matching is exact, so `CYCLES` is not `cycles`, and a list mixing valid and invalid names is refused whole. The `verdict-file` output holds the policy that actually ran. Each row below is a real value you can paste into `with:`:
 
 | You want | Set |
 |---|---|
@@ -57,7 +57,7 @@ Two separate things decide that: what Enola **finds**, and what your inputs **fa
 | Fail on a layer order you declared being crossed the wrong way | `fail-on: layers` |
 | Also fail on an undeclared cross-repo seam, and on new cycles | `fail-on: layers,intent,cycles` |
 | Fail on a breach of an architecture rule you declared in `enola/constraints/` | `fail-on: constraints` |
-| Everything Enola proves, plus the thirteen it infers | `fail-on: layers,intent,cycles,constraints,crossrepo,coverage,unused-routes,god-class,hotspots,dependency-depth,exported-surface,complexity-outliers,domain,query-loops,entry-points,messaging-coverage,dead-methods` **and** `min-confidence: "0.8"` |
+| Everything Enola proves, plus the fourteen it infers | `fail-on: layers,intent,cycles,constraints,crossrepo,coverage,unused-routes,god-class,hotspots,dependency-depth,exported-surface,complexity-outliers,domain,query-loops,entry-points,messaging-coverage,dead-methods,vendored-candidates` **and** `min-confidence: "0.8"` |
 | Enforce a policy, but only warn on this branch | `fail-on: layers` **and** `warn-only: "true"` |
 | Fail if the change spread outside the area you named | `target: internal/auth` **and** `max-spillover: "0"` |
 
@@ -73,7 +73,9 @@ A failing run, with `fail-on: layers`. The job summary, verbatim:
 >
 > | Base | Current | Enola |
 > |---|---|---|
-> | `9f2c1ab4` | `3b7e5c2a` | `0.3.18` |
+> | `9f2c1ab4` | `3b7e5c2a` | `0.4.5` |
+>
+> _could not see: 0 files and 1 directory excluded by ignore globs; 2 imports targets outside the graph_
 >
 > ## Regressions
 >
@@ -87,12 +89,14 @@ A failing run, with `fail-on: layers`. The job summary, verbatim:
 > | Edges | 2 | 0 |
 > | Findings | 1 | 0 |
 
-The same finding also lands on `storage/storage.go` as a source annotation, so it shows up in the **Files changed** tab next to the import that caused it. Without `fail-on: layers` the identical finding appears under **Findings (reported, not enforced)**, annotates as a warning, and the job passes.
+The italic line under the table is Enola's census: what the run could not see, printed on every outcome including a pass, so a green check over a graph that skipped the files the change touched cannot be mistaken for one that resolved them.
+
+The same finding also lands on `storage/storage.go` as a source annotation, so it shows up in the **Files changed** tab next to the import that caused it - on the line the extractor measured, when it measured one. Without `fail-on: layers` the identical finding appears under **Findings (reported, not enforced)**, annotates as a warning, and the job passes.
 
 Two traps worth knowing before you set `fail-on`:
 
 - **No `fail-on` means no gate.** A workflow that sets neither `fail-on` nor `max-spillover` cannot fail, whatever Enola finds. The action emits a job warning and a summary notice on every such run rather than letting a green check speak for itself, but a required status check configured on it is protecting nothing.
-- **Naming an explainer is not always enough, because the floor applies per finding.** Only four of the seventeen ever reach `1.00`: `cycles`, `intent`, `constraints` for a rule in enforcing mode, and `layers` when the layer order is *declared* in `enola-intent.yaml`. Everything else is inferred rather than proven and is capped at `0.95` by design, so it cannot fail at the default floor no matter what you put in `fail-on`. Naming any of the other thirteen is a no-op until you also lower `min-confidence`.
+- **Naming an explainer is not always enough, because the floor applies per finding.** Only four of the eighteen ever reach `1.00`: `cycles`, `intent`, `constraints` for a rule in enforcing mode, and `layers` when the layer order is *declared* in `enola-intent.yaml`. Everything else is inferred rather than proven and is capped at `0.95` by design, so it cannot fail at the default floor no matter what you put in `fail-on`. Naming any of the other fourteen is a no-op until you also lower `min-confidence`.
 
 ## Configuration
 
@@ -104,7 +108,8 @@ Every input is optional. The workflow above is the whole setup.
     # Explainers whose new findings fail the job. WITHOUT THIS INPUT NOTHING FAILS.
     # Any of: cycles, layers, intent, constraints, crossrepo, coverage, unused-routes,
     # god-class, hotspots, dependency-depth, exported-surface, complexity-outliers,
-    # domain, query-loops, entry-points, messaging-coverage, dead-methods
+    # domain, query-loops, entry-points, messaging-coverage, dead-methods,
+    # vendored-candidates
     fail-on: layers,intent,cycles
     # Confidence floor within those explainers. Default "1.00" — only cycles, intent,
     # constraints and declared-layer violations reach it, so lower this to enforce the rest.
@@ -115,7 +120,7 @@ Every input is optional. The workflow above is the whole setup.
     max-spillover: "0"
 ```
 
-That block sets four inputs at once to show what they look like together; each one is independently optional. There are [twelve more](#every-input) - the base override, the annotation and summary switches, the working directory, and the version or binary to grade with.
+That block sets four inputs at once to show what they look like together; each one is independently optional. There are [fourteen more](#every-input) - the base override, the annotation and summary switches, the working directory, and the version or binary to grade with.
 
 **There is no config file to write.** Enola ships its own defaults - it detects the languages in your repository, ignores the usual build output, vendored dependencies and test trees, and runs every extractor and explainer it has. That is what the quickstart above does, with no `mcp-arch.yaml` anywhere.
 
@@ -125,7 +130,7 @@ The action requires the base commit to be available. `fetch-depth: 0` is recomme
 
 ### Every input
 
-Sixteen, all optional, defaults in the right-hand column.
+Eighteen, all optional, defaults in the right-hand column.
 
 | Input | Default | What it does |
 |---|---|---|
@@ -142,11 +147,49 @@ Sixteen, all optional, defaults in the right-hand column.
 | `binary` | - | grade with an executable the workflow built instead; wins over `version` |
 | `base-sha` | - | override the base commit the action resolved |
 | `annotations` | `true` | emit source annotations |
+| `sarif` | `false` | also write the findings as SARIF 2.1.0, for upload to code scanning |
 | `summary` | `true` | write the job summary |
 | `working-directory` | `.` | repository-relative project directory |
 | `token` | `github.token` | used only to resolve the latest release version |
 
-And eight outputs: `status`, `regressions`, `advisories`, `facts-added`, `facts-removed`, `edges-added`, `edges-removed`, and `verdict-file` - the path to the complete JSON verdict, which carries more than the other seven summarise.
+And twelve outputs: `status`, `partial`, `regressions`, `advisories`, `facts-added`, `facts-removed`, `edges-added`, `edges-removed`, `ungraded-facts`, `ungraded-findings`, `sarif-file`, and `verdict-file` - the path to the complete JSON verdict, which carries more than the others summarise.
+
+`status` is `clean`, `regression`, `usage_error`, `incomparable`, or one of the two **partial** forms - see [when Enola grades only part of the graph](#when-enola-grades-only-part-of-the-graph).
+
+Set `sarif: "true"` to get a SARIF 2.1.0 file alongside the verdict, rendered from the same run - one rule per declared rule id with your `because:` as its description, the evidence span as the region, and a stable fingerprint so a host can follow one finding across builds:
+
+```yaml
+- uses: enola-labs/enola-action@v2
+  id: enola
+  with:
+    fail-on: constraints
+    sarif: "true"
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: ${{ steps.enola.outputs.sarif-file }}
+```
+
+## When Enola grades only part of the graph
+
+A pull request that adds the first Ruby file to a TypeScript repository changes **who produced the facts**: the base snapshot has no Ruby extractor, the head does. Enola used to refuse to grade that at all. It now grades the producers both snapshots share, reports `partial_clean` or `partial_regression`, and states plainly what it left out - exit codes stay `0` and `1`, so the pass/fail meaning of the job does not change.
+
+The action treats a partial verdict as the real pass or fail it is, and never as a whole one:
+
+- the job summary headline carries **(partial verdict)** and a block naming every excluded producer, which side lacked it, and how many facts and findings went ungraded;
+- the same sentence is a job warning, so it is visible in the diff and not only in the summary;
+- `partial` is `true`, and `ungraded-facts` / `ungraded-findings` carry the counts - gate on them if your workflow needs a whole verdict:
+
+```yaml
+- uses: enola-labs/enola-action@v2
+  id: enola
+  with:
+    fail-on: layers
+- if: steps.enola.outputs.partial == 'true'
+  run: echo "::error::Enola could not grade every producer"; exit 1
+```
+
+A regression among an excluded producer's facts is **not** reported. That is what makes the verdict partial, and it is why the action says so everywhere it says anything.
 
 By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.3.13"`, for reproducible checks that don't change when a new Enola version ships.
 
@@ -173,7 +216,7 @@ enola baseline pin      # freeze the architecture before you edit
 enola check             # exit 1 on a structural regression
 ```
 
-Same explainers, same exit codes. What the action adds is the pull-request wiring: it resolves the exact base commit, pins and grades both sides itself - no baseline artifact to publish and restore - turns new findings into source annotations, and writes the delta to the job summary. Failing findings annotate as errors and advisory ones as warnings, capped at ten of each so a large delta doesn't bury the page; the `verdict-file` output always holds the complete verdict.
+Same explainers, same exit codes. What the action adds is the pull-request wiring: it resolves the exact base commit, pins and grades both sides itself - no baseline artifact to publish and restore - turns new findings into source annotations, and writes the delta to the job summary. Failing findings annotate as errors, advisory ones and rules your change newly declared as warnings, on the line the extractor measured - capped at ten per level, with a notice saying how many were held back so a cap never reads as "that was all of them". Findings with no position are counted rather than pinned to a line nobody wrote. The `verdict-file` output always holds the complete verdict, every bucket included.
 
 - **[enola](https://github.com/enola-labs/enola)** - what it is, what fails a build, and the 20+ languages it parses
 - **[docs/CLI.md](https://github.com/enola-labs/enola/blob/main/docs/CLI.md)** - the flags behind the `fail-on`, `min-confidence`, `target` and `max-spillover` inputs

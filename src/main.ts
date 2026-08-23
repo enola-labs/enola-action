@@ -9,8 +9,19 @@ import { addWorktree, ensureCommit, removeWorktree } from "./platform/git.js";
 import { checkArguments, readInputs } from "./policy/inputs.js";
 import { installEnola, useLocalEnola } from "./platform/install.js";
 import { logVerdict, writeSummary } from "./report/summary.js";
-import { WebhookPayload } from "./core/types.js";
-import { assertExitCode, parseVerdict, regressionCount, saveVerdict } from "./policy/verdict.js";
+import { toSarif } from "./report/sarif.js";
+import { Verdict, WebhookPayload } from "./core/types.js";
+import {
+  assertExitCode,
+  isKnownStatus,
+  isPartial,
+  jobFailed,
+  parseVerdict,
+  regressionCount,
+  saveVerdict,
+  ungradedFacts,
+  ungradedFindings,
+} from "./policy/verdict.js";
 
 export async function run(): Promise<void> {
   const inputs = readInputs();
@@ -50,6 +61,7 @@ export async function run(): Promise<void> {
   // this stayed invisible: the verdict looked right while every count under it was wrong.
   const baseRoot = path.join(temporaryRoot, path.basename(headRoot));
   const verdictFile = path.join(temporaryRoot, "verdict.json");
+  const sarifFile = path.join(temporaryRoot, "enola.sarif");
   await addWorktree(headRoot, baseRoot, revisions.baseSha);
 
   try {
@@ -69,12 +81,23 @@ export async function run(): Promise<void> {
     } catch (error) {
       throw new Error(`${error instanceof Error ? error.message : String(error)}\n${result.stderr.trim()}`.trim());
     }
+    // A status this action has not been taught is a reason to say so, not to fail a job
+    // Enola passed. The exit code decides in that case; see parseVerdict.
+    if (!isKnownStatus(verdict.status)) {
+      core.warning(
+        `Enola reported the status "${verdict.status}", which this version of the action does not know. ` +
+          `Reading its exit code (${result.exitCode}) instead. Upgrading enola-action will report it properly.`,
+      );
+    }
     assertExitCode(verdict, result.exitCode);
     await saveVerdict(verdictFile, result.stdout);
 
     core.setOutput("status", verdict.status);
+    core.setOutput("partial", isPartial(verdict));
     core.setOutput("regressions", regressionCount(verdict));
     core.setOutput("advisories", (verdict.advisories || []).length);
+    core.setOutput("ungraded-facts", ungradedFacts(verdict));
+    core.setOutput("ungraded-findings", ungradedFindings(verdict));
     core.setOutput("facts-added", verdict.facts_added);
     core.setOutput("facts-removed", verdict.facts_removed);
     core.setOutput("edges-added", verdict.edges_added);
@@ -82,20 +105,38 @@ export async function run(): Promise<void> {
     core.setOutput("verdict-file", verdictFile);
 
     logVerdict(verdict);
-    if (inputs.annotations) annotate(verdict);
-    if (inputs.summary) await writeSummary(verdict, revisions.baseSha, revisions.headSha, installed.version);
+    if (inputs.annotations) annotate(verdict, headDirectory);
+    if (inputs.sarif) {
+      await fs.writeFile(sarifFile, `${toSarif(verdict, installed.version, headDirectory)}\n`, "utf8");
+      core.setOutput("sarif-file", sarifFile);
+    }
+    if (inputs.summary) {
+      await writeSummary(verdict, revisions.baseSha, revisions.headSha, installed.version, inputs.detail);
+    }
 
-    if (verdict.status !== "clean") {
-      core.setFailed(
-        verdict.status === "regression"
-          ? `${regressionCount(verdict)} architectural regression(s) introduced.`
-          : verdict.status === "incomparable"
-            ? "Enola refused to grade incomparable snapshots."
-            : "Enola could not complete the architecture check.",
-      );
+    if (jobFailed(verdict, result.exitCode)) {
+      core.setFailed(failureMessage(verdict, result.exitCode));
     }
   } finally {
     await removeWorktree(headRoot, baseRoot);
+  }
+}
+
+// Why the job is red, in the words of the status that made it red. A partial regression
+// is a real one — of the producers both snapshots share — and saying only that much is
+// what keeps it from reading as a verdict over the whole graph.
+function failureMessage(verdict: Verdict, exitCode: number): string {
+  const partial = isPartial(verdict) ? " Only the producers both snapshots share were graded." : "";
+  switch (verdict.status) {
+    case "regression":
+    case "partial_regression":
+      return `${regressionCount(verdict)} architectural regression(s) introduced.${partial}`;
+    case "incomparable":
+      return "Enola refused to grade incomparable snapshots.";
+    case "usage_error":
+      return "Enola could not complete the architecture check.";
+    default:
+      return `Enola exited ${exitCode} with status "${verdict.status}".`;
   }
 }
 
