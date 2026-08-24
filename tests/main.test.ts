@@ -3,14 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const core = vi.hoisted(() => ({
   info: vi.fn(),
   warning: vi.fn(),
+  notice: vi.fn(),
   setOutput: vi.fn(),
   setFailed: vi.fn(),
   summary: { addRaw: vi.fn().mockReturnThis(), write: vi.fn() },
 }));
 vi.mock("@actions/core", () => core);
 
-const fsMock = vi.hoisted(() => ({ readFile: vi.fn(), mkdtemp: vi.fn() }));
-vi.mock("node:fs", () => ({ promises: fsMock }));
+const fsMock = vi.hoisted(() => ({ readFile: vi.fn(), mkdtemp: vi.fn(), writeFile: vi.fn() }));
+// existsSync is what resolves a repository-prefixed fact path against the checkout. Here
+// nothing exists, which is the honest answer for a mocked filesystem: the path is then
+// used exactly as Enola recorded it, never guessed at.
+vi.mock("node:fs", () => ({ promises: fsMock, existsSync: () => false }));
 
 const annotate = vi.hoisted(() => vi.fn());
 vi.mock("../src/report/annotations.js", () => ({ annotate }));
@@ -217,5 +221,149 @@ describe("the base worktree's directory name", () => {
     await run();
     const [, worktreePath] = git.addWorktree.mock.calls[0];
     expect(worktreePath).toBe("/tmp/enola-action-xyz/workspace");
+  });
+});
+
+// The break this action shipped with: Enola returns `partial_clean` at exit 0 whenever
+// the two snapshots were produced by different producer sets — a pull request adding the
+// first file in a language does it — and the action rejected the name and turned a clean
+// build red.
+describe("a partial verdict", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.assign(process.env, baseEnv);
+    fsMock.readFile.mockResolvedValue("{}");
+    fsMock.mkdtemp.mockResolvedValue("/tmp/enola-action-xyz");
+    contextModule.resolveRevisionContext.mockReturnValue({ baseSha: "basesha", headSha: "headsha", eventName: "pull_request" });
+    install.installEnola.mockResolvedValue({ path: "/bin/enola", version: "1.2.3" });
+    inputsModule.readInputs.mockReturnValue(defaultInputs());
+  });
+
+  function partial(status: string, extra: Record<string, unknown> = {}) {
+    capture.mockReset();
+    capture
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ exitCode: status === "partial_regression" ? 1 : 0, stdout: "{}", stderr: "" });
+    verdictModule.parseVerdict.mockReturnValue({
+      status,
+      failures: [],
+      advisories: [],
+      edges_added: 0,
+      edges_removed: 0,
+      facts_added: 0,
+      facts_removed: 0,
+      intersection_grading: {
+        shared_extractors: ["typescript"],
+        excluded: [
+          {
+            name: "ruby",
+            kind: "extractor",
+            lacked_by: "baseline",
+            baseline_facts_excluded: 0,
+            current_facts_excluded: 2,
+            baseline_findings_excluded: 0,
+            current_findings_excluded: 1,
+          },
+        ],
+      },
+      ...extra,
+    });
+  }
+
+  it("passes the job and reports what was not graded", async () => {
+    partial("partial_clean");
+    await run();
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith("status", "partial_clean");
+    expect(core.setOutput).toHaveBeenCalledWith("partial", true);
+    expect(core.setOutput).toHaveBeenCalledWith("ungraded-facts", 2);
+    expect(core.setOutput).toHaveBeenCalledWith("ungraded-findings", 1);
+  });
+
+  it("fails the job on a partial regression, saying it graded only the shared producers", async () => {
+    partial("partial_regression", { failures: [{ title: "x", confidence: 1 }] });
+    await run();
+    expect(core.setFailed).toHaveBeenCalledWith(
+      "1 architectural regression(s) introduced. Only the producers both snapshots share were graded.",
+    );
+  });
+});
+
+// The lesson generalised: a status name this action has not been taught must not be able
+// to fail a job Enola passed.
+describe("a status from a newer Enola", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.assign(process.env, baseEnv);
+    fsMock.readFile.mockResolvedValue("{}");
+    fsMock.mkdtemp.mockResolvedValue("/tmp/enola-action-xyz");
+    contextModule.resolveRevisionContext.mockReturnValue({ baseSha: "basesha", headSha: "headsha", eventName: "pull_request" });
+    install.installEnola.mockResolvedValue({ path: "/bin/enola", version: "1.2.3" });
+    inputsModule.readInputs.mockReturnValue(defaultInputs());
+    capture
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "{}", stderr: "" });
+    verdictModule.parseVerdict.mockReturnValue({
+      status: "provisional_clean",
+      failures: [],
+      advisories: [],
+      edges_added: 0,
+      edges_removed: 0,
+      facts_added: 0,
+      facts_removed: 0,
+    });
+  });
+
+  it("warns about the name and lets the exit code decide", async () => {
+    await run();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("does not know"));
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith("status", "provisional_clean");
+  });
+});
+
+describe("the sarif input", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.assign(process.env, baseEnv);
+    fsMock.readFile.mockResolvedValue("{}");
+    fsMock.mkdtemp.mockResolvedValue("/tmp/enola-action-xyz");
+    fsMock.writeFile.mockResolvedValue(undefined);
+    contextModule.resolveRevisionContext.mockReturnValue({ baseSha: "basesha", headSha: "headsha", eventName: "pull_request" });
+    install.installEnola.mockResolvedValue({ path: "/bin/enola", version: "1.2.3" });
+    capture
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "{}", stderr: "" });
+    verdictModule.parseVerdict.mockReturnValue({
+      status: "clean",
+      failures: [{ title: "Cycle", source: "cycles", confidence: 1, evidence: [{ file: "src/a.ts", line: 4 }] }],
+      advisories: [],
+      edges_added: 0,
+      edges_removed: 0,
+      facts_added: 0,
+      facts_removed: 0,
+    });
+  });
+
+  it("writes a SARIF file from the same verdict, without a second check run", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ sarif: true }));
+    await run();
+    const [file, body] = fsMock.writeFile.mock.calls.at(-1) as [string, string];
+    expect(file).toBe("/tmp/enola-action-xyz/enola.sarif");
+    const document = JSON.parse(body);
+    expect(document.version).toBe("2.1.0");
+    expect(document.runs[0].tool.driver.rules[0].id).toBe("cycles");
+    expect(document.runs[0].results[0].locations[0].physicalLocation.region.startLine).toBe(4);
+    expect(core.setOutput).toHaveBeenCalledWith("sarif-file", "/tmp/enola-action-xyz/enola.sarif");
+    // Two captures: the pin and the check. A third would mean a second snapshot of the
+    // whole repository just to re-render numbers already in hand.
+    expect(capture).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes nothing when it is not asked to", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs());
+    await run();
+    expect(fsMock.writeFile).not.toHaveBeenCalled();
+    expect(core.setOutput).not.toHaveBeenCalledWith("sarif-file", expect.anything());
   });
 });

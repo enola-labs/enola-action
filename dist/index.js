@@ -34173,6 +34173,7 @@ const git_js_1 = __nccwpck_require__(4555);
 const inputs_js_1 = __nccwpck_require__(5725);
 const install_js_1 = __nccwpck_require__(5371);
 const summary_js_1 = __nccwpck_require__(7994);
+const sarif_js_1 = __nccwpck_require__(5881);
 const verdict_js_1 = __nccwpck_require__(5187);
 async function run() {
     const inputs = (0, inputs_js_1.readInputs)();
@@ -34211,6 +34212,7 @@ async function run() {
     // this stayed invisible: the verdict looked right while every count under it was wrong.
     const baseRoot = node_path_1.default.join(temporaryRoot, node_path_1.default.basename(headRoot));
     const verdictFile = node_path_1.default.join(temporaryRoot, "verdict.json");
+    const sarifFile = node_path_1.default.join(temporaryRoot, "enola.sarif");
     await (0, git_js_1.addWorktree)(headRoot, baseRoot, revisions.baseSha);
     try {
         const baseDirectory = node_path_1.default.resolve(baseRoot, inputs.workingDirectory);
@@ -34232,11 +34234,20 @@ async function run() {
         catch (error) {
             throw new Error(`${error instanceof Error ? error.message : String(error)}\n${result.stderr.trim()}`.trim());
         }
+        // A status this action has not been taught is a reason to say so, not to fail a job
+        // Enola passed. The exit code decides in that case; see parseVerdict.
+        if (!(0, verdict_js_1.isKnownStatus)(verdict.status)) {
+            core.warning(`Enola reported the status "${verdict.status}", which this version of the action does not know. ` +
+                `Reading its exit code (${result.exitCode}) instead. Upgrading enola-action will report it properly.`);
+        }
         (0, verdict_js_1.assertExitCode)(verdict, result.exitCode);
         await (0, verdict_js_1.saveVerdict)(verdictFile, result.stdout);
         core.setOutput("status", verdict.status);
+        core.setOutput("partial", (0, verdict_js_1.isPartial)(verdict));
         core.setOutput("regressions", (0, verdict_js_1.regressionCount)(verdict));
         core.setOutput("advisories", (verdict.advisories || []).length);
+        core.setOutput("ungraded-facts", (0, verdict_js_1.ungradedFacts)(verdict));
+        core.setOutput("ungraded-findings", (0, verdict_js_1.ungradedFindings)(verdict));
         core.setOutput("facts-added", verdict.facts_added);
         core.setOutput("facts-removed", verdict.facts_removed);
         core.setOutput("edges-added", verdict.edges_added);
@@ -34244,19 +34255,37 @@ async function run() {
         core.setOutput("verdict-file", verdictFile);
         (0, summary_js_1.logVerdict)(verdict);
         if (inputs.annotations)
-            (0, annotations_js_1.annotate)(verdict);
-        if (inputs.summary)
-            await (0, summary_js_1.writeSummary)(verdict, revisions.baseSha, revisions.headSha, installed.version);
-        if (verdict.status !== "clean") {
-            core.setFailed(verdict.status === "regression"
-                ? `${(0, verdict_js_1.regressionCount)(verdict)} architectural regression(s) introduced.`
-                : verdict.status === "incomparable"
-                    ? "Enola refused to grade incomparable snapshots."
-                    : "Enola could not complete the architecture check.");
+            (0, annotations_js_1.annotate)(verdict, headDirectory);
+        if (inputs.sarif) {
+            await node_fs_1.promises.writeFile(sarifFile, `${(0, sarif_js_1.toSarif)(verdict, installed.version, headDirectory)}\n`, "utf8");
+            core.setOutput("sarif-file", sarifFile);
+        }
+        if (inputs.summary) {
+            await (0, summary_js_1.writeSummary)(verdict, revisions.baseSha, revisions.headSha, installed.version, inputs.detail);
+        }
+        if ((0, verdict_js_1.jobFailed)(verdict, result.exitCode)) {
+            core.setFailed(failureMessage(verdict, result.exitCode));
         }
     }
     finally {
         await (0, git_js_1.removeWorktree)(headRoot, baseRoot);
+    }
+}
+// Why the job is red, in the words of the status that made it red. A partial regression
+// is a real one — of the producers both snapshots share — and saying only that much is
+// what keeps it from reading as a verdict over the whole graph.
+function failureMessage(verdict, exitCode) {
+    const partial = (0, verdict_js_1.isPartial)(verdict) ? " Only the producers both snapshots share were graded." : "";
+    switch (verdict.status) {
+        case "regression":
+        case "partial_regression":
+            return `${(0, verdict_js_1.regressionCount)(verdict)} architectural regression(s) introduced.${partial}`;
+        case "incomparable":
+            return "Enola refused to grade incomparable snapshots.";
+        case "usage_error":
+            return "Enola could not complete the architecture check.";
+        default:
+            return `Enola exited ${exitCode} with status "${verdict.status}".`;
     }
 }
 if (process.env.NODE_ENV !== "test") {
@@ -34577,11 +34606,19 @@ function readInputs() {
         maxSpillover: optional("max-spillover"),
         baseSha: optional("base-sha"),
         annotations: core.getBooleanInput("annotations"),
+        sarif: core.getBooleanInput("sarif"),
         summary: core.getBooleanInput("summary"),
         workingDirectory: core.getInput("working-directory").trim() || ".",
         token: optional("token"),
     };
 }
+// The `enola check` invocation. One run, one format: the JSON verdict, which is what the
+// outputs, the summary, the annotations and the SARIF file are all rendered from.
+//
+// `--detail` is deliberately NOT passed. Enola honours it only when it is writing text —
+// the JSON document always carries the whole delta — so passing it alongside `--json`
+// changed nothing at all, which is what the `detail` input used to do. The input now
+// renders that delta into the job summary instead.
 function checkArguments(inputs, baseline) {
     const args = ["check", "--baseline", baseline, "--json"];
     if (inputs.failOn)
@@ -34592,8 +34629,6 @@ function checkArguments(inputs, baseline) {
         args.push("--warn-only");
     if (inputs.focus)
         args.push("--focus", inputs.focus);
-    if (inputs.detail)
-        args.push("--detail");
     if (inputs.target)
         args.push("--target", inputs.target);
     if (inputs.expected)
@@ -34614,20 +34649,51 @@ function checkArguments(inputs, baseline) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isKnownStatus = isKnownStatus;
+exports.isPartial = isPartial;
 exports.parseVerdict = parseVerdict;
 exports.fatalBreaches = fatalBreaches;
 exports.regressionCount = regressionCount;
 exports.enforcesNothing = enforcesNothing;
+exports.excludedProducers = excludedProducers;
+exports.ungradedFacts = ungradedFacts;
+exports.ungradedFindings = ungradedFindings;
+exports.jobFailed = jobFailed;
 exports.assertExitCode = assertExitCode;
 exports.saveVerdict = saveVerdict;
 const node_fs_1 = __nccwpck_require__(3024);
-const statuses = new Set(["clean", "regression", "usage_error", "incomparable"]);
+// The status → exit code contract, and the only place it is written down.
+//
+// `partial_clean` and `partial_regression` exit 0 and 1 like their whole-verdict
+// counterparts: Enola grades the intersection of the producers both snapshots share
+// rather than declining, so CI needs no change — but the action does, because it reads
+// the NAME. See VerdictStatus.
 const exitCodes = {
     clean: 0,
+    partial_clean: 0,
     regression: 1,
+    partial_regression: 1,
     usage_error: 2,
     incomparable: 3,
 };
+function isKnownStatus(status) {
+    return Object.prototype.hasOwnProperty.call(exitCodes, status);
+}
+// A verdict Enola graded over a subset of its producers. It is a real pass or a real
+// fail — of the facts it could compare. What it is NOT is a full verdict, and every
+// surface that reports one has to say so.
+function isPartial(verdict) {
+    return verdict.status === "partial_clean" || verdict.status === "partial_regression";
+}
+// An unknown status must not fail the job by itself.
+//
+// This action used to reject any status outside a closed set of four. Enola then added
+// two, exiting 0 and 1 as before, and the gate turned every clean pull request red with
+// "Unknown Enola status: partial_clean" — a green build reported as broken by the tool
+// that was supposed to be reading it. A name this action does not know is now a loud
+// warning and the PROCESS EXIT CODE decides, which is the contract Enola documents and
+// the one thing that cannot drift out from under a consumer. It never turns a failure
+// green: a non-zero exit still fails the job.
 function parseVerdict(raw) {
     let value;
     try {
@@ -34639,8 +34705,8 @@ function parseVerdict(raw) {
     if (!value || typeof value !== "object")
         throw new Error("Enola verdict is not an object.");
     const verdict = value;
-    if (!verdict.status || !statuses.has(verdict.status))
-        throw new Error(`Unknown Enola status: ${verdict.status}`);
+    if (typeof verdict.status !== "string" || !verdict.status)
+        throw new Error("Enola verdict is missing a status.");
     for (const key of ["edges_added", "edges_removed", "facts_added", "facts_removed"]) {
         if (typeof verdict[key] !== "number")
             throw new Error(`Enola verdict is missing numeric ${key}.`);
@@ -34673,7 +34739,28 @@ function enforcesNothing(verdict) {
         return false; // An older Enola that does not report its policy.
     return (policy.fail_explainers || []).length === 0 && (policy.thresholds || []).length === 0;
 }
+function excludedProducers(verdict) {
+    return verdict.intersection_grading?.excluded || [];
+}
+// What a partial verdict did not grade. Reported as an output so a workflow can require
+// a whole verdict — "fail if anything went ungraded" is a policy this action cannot
+// decide for a consumer, but it must give them the number to decide with.
+function ungradedFacts(verdict) {
+    return excludedProducers(verdict).reduce((n, p) => n + p.baseline_facts_excluded + p.current_facts_excluded, 0);
+}
+function ungradedFindings(verdict) {
+    return excludedProducers(verdict).reduce((n, p) => n + p.baseline_findings_excluded + p.current_findings_excluded, 0);
+}
+// Whether the job goes red. A known status decides by its documented exit code; an
+// unknown one by the exit code Enola actually returned.
+function jobFailed(verdict, exitCode) {
+    if (isKnownStatus(verdict.status))
+        return exitCodes[verdict.status] !== 0;
+    return exitCode !== 0;
+}
 function assertExitCode(verdict, exitCode) {
+    if (!isKnownStatus(verdict.status))
+        return; // Nothing to assert against; the caller warns.
     const expected = exitCodes[verdict.status];
     if (exitCode !== expected) {
         throw new Error(`Enola status ${verdict.status} requires exit code ${expected}, received ${exitCode}.`);
@@ -34727,35 +34814,390 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.annotate = annotate;
 const core = __importStar(__nccwpck_require__(7484));
+const findings_js_1 = __nccwpck_require__(9334);
 const LIMIT = 10;
-function location(finding) {
-    if (finding.location?.file)
-        return finding.location;
-    const evidence = finding.evidence?.find((item) => item.file);
-    return evidence?.file ? { file: evidence.file } : undefined;
-}
-function properties(finding) {
-    const at = location(finding);
+function properties(placement, root) {
+    const at = placement.at;
     return {
-        title: `Enola: ${finding.source || "architecture"}`,
-        file: at?.file,
+        title: `Enola: ${(0, findings_js_1.ruleOf)(placement.finding)}`,
+        file: at?.file ? (0, findings_js_1.hostPath)(at.file, root) : undefined,
         startLine: at?.line,
         endLine: at?.end_line || at?.line,
+        startColumn: at?.line ? at.column : undefined,
+        endColumn: at?.line ? at.end_column : undefined,
     };
 }
-function message(finding) {
-    return `${finding.title} (confidence ${finding.confidence.toFixed(2)})`;
-}
-function annotate(verdict) {
-    for (const finding of (verdict.failures || []).slice(0, LIMIT)) {
-        core.error(message(finding), properties(finding));
+// One annotation's text: what the finding says, how certain it is, and — when the team
+// wrote one — the reason their own rule gives and the action it suggests. The rule id
+// goes in the annotation's title, so it is not repeated here.
+function message(placement) {
+    const finding = placement.finding;
+    const lines = [`${(0, findings_js_1.oneLine)(finding.title)} (confidence ${finding.confidence.toFixed(2)})`];
+    if (placement.bucket.name === "declared") {
+        lines.push("Declared by this change: the rule is new, the code it names is not. Not counted as a regression.");
     }
-    for (const finding of (verdict.advisories || []).slice(0, LIMIT)) {
-        core.warning(message(finding), properties(finding));
+    const because = (0, findings_js_1.becauseOf)(finding);
+    if (because)
+        lines.push(`Because: ${because}`);
+    const action = (0, findings_js_1.actionOf)(finding);
+    if (action)
+        lines.push(`Action: ${action}`);
+    return lines.join("\n");
+}
+// Annotations for the buckets a reviewer can act on: failures as errors, advisories and
+// newly declared rules as warnings. The note-level buckets — suppressed, exempted,
+// silenced, undeclared, incidental, descriptive, unattributed — stay in the summary:
+// they are things that did NOT happen to this change, and pinning them to lines in the
+// diff would bury the ones that did.
+//
+// `root` is the checked-out directory the verdict was computed in. It is what lets a
+// repository-prefixed path from a union snapshot resolve to a file the host can open;
+// without it the path is used exactly as recorded, never guessed at.
+function annotate(verdict, root) {
+    const shown = { [findings_js_1.LEVEL_ERROR]: 0, [findings_js_1.LEVEL_WARNING]: 0 };
+    const dropped = { [findings_js_1.LEVEL_ERROR]: 0, [findings_js_1.LEVEL_WARNING]: 0 };
+    let unplaced = 0;
+    for (const placement of (0, findings_js_1.placements)(verdict)) {
+        const level = placement.bucket.level;
+        if (level !== findings_js_1.LEVEL_ERROR && level !== findings_js_1.LEVEL_WARNING)
+            continue;
+        if (!placement.at?.file) {
+            unplaced++;
+            continue;
+        }
+        if (shown[level] >= LIMIT) {
+            dropped[level]++;
+            continue;
+        }
+        shown[level]++;
+        const emit = level === findings_js_1.LEVEL_ERROR ? core.error : core.warning;
+        emit(message(placement), properties(placement, root));
+    }
+    // A cap that hides findings without saying so reads as "that was all of them".
+    for (const [level, count] of Object.entries(dropped)) {
+        if (count > 0) {
+            core.notice(`${(0, findings_js_1.plural)(count, `further ${level}-level finding is`, `further ${level}-level findings are`)} ` +
+                "not annotated (10 per level); the job summary and the verdict file carry them all.");
+        }
+    }
+    if (unplaced > 0) {
+        core.notice(`${(0, findings_js_1.plural)(unplaced, "finding", "findings")} without a position ${unplaced === 1 ? "stays" : "stay"} in the ` +
+            "summary rather than being pinned to a line nobody wrote.");
+    }
+    // A partial verdict passed or failed over PART of the graph. Said here as well as in
+    // the summary, because the annotations are what a reviewer reads in the diff.
+    const excluded = verdict.intersection_grading?.excluded || [];
+    if (excluded.length) {
+        const named = excluded.map((producer) => `${producer.name} (${producer.kind}, ${producer.lacked_by} lacks it)`);
+        core.warning(`Partial verdict: only producers present in BOTH snapshots were graded. Excluded: ${named.join("; ")}. ` +
+            "A regression among an excluded producer's facts is NOT reported.");
     }
     if (verdict.status === "incomparable") {
         core.error(`Enola refused to grade this change: ${(verdict.comparability_warnings || []).join("; ") || "snapshots are not comparable"}`);
     }
+}
+
+
+/***/ }),
+
+/***/ 9334:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.LEVEL_NONE = exports.LEVEL_NOTE = exports.LEVEL_WARNING = exports.LEVEL_ERROR = void 0;
+exports.buckets = buckets;
+exports.placements = placements;
+exports.ruleOf = ruleOf;
+exports.reasonOf = reasonOf;
+exports.becauseOf = becauseOf;
+exports.actionOf = actionOf;
+exports.placeOf = placeOf;
+exports.hostPath = hostPath;
+exports.policyOf = policyOf;
+exports.excuseOf = excuseOf;
+exports.identityOf = identityOf;
+exports.oneLine = oneLine;
+exports.plural = plural;
+const node_crypto_1 = __nccwpck_require__(7598);
+const node_fs_1 = __nccwpck_require__(3024);
+const node_path_1 = __importDefault(__nccwpck_require__(6760));
+// How to read a finding, in one place, ported from the engine's own reader
+// (`pkg/check/format.go`). Every surface the job leaves behind — annotations, the
+// summary, SARIF — describes a finding through these, so the three cannot come to
+// disagree about which rule a finding is, where it points, or why it did not fail.
+exports.LEVEL_ERROR = "error";
+exports.LEVEL_WARNING = "warning";
+exports.LEVEL_NOTE = "note";
+exports.LEVEL_NONE = "none";
+// Every bucket a verdict carries, in the engine's order.
+//
+// The buckets below `advisory` are the ones this action used to drop on the floor.
+// They are not noise: `declared` is a rule that arrived over code nobody touched (a
+// count that would read as "this change introduced 3,980 findings" if folded into
+// advisories), `silenced` and `undeclared` are breaches that stopped being REPORTED
+// without being fixed, and `suppressed`/`exempted` are the audit trail of what a ledger
+// excused. Enola splits them apart precisely so a reader is not told a fix happened
+// when a question stopped being asked.
+function buckets(verdict) {
+    return [
+        { name: "failure", level: exports.LEVEL_ERROR, findings: verdict.failures || [] },
+        { name: "advisory", level: exports.LEVEL_WARNING, findings: verdict.advisories || [] },
+        { name: "declared", level: exports.LEVEL_WARNING, findings: verdict.declared || [] },
+        { name: "descriptive", level: exports.LEVEL_NOTE, findings: verdict.descriptive || [] },
+        { name: "incidental", level: exports.LEVEL_NOTE, findings: verdict.incidental || [] },
+        { name: "suppressed", level: exports.LEVEL_NOTE, findings: verdict.suppressed || [] },
+        { name: "exempted", level: exports.LEVEL_NOTE, findings: verdict.exempted || [] },
+        { name: "silenced", level: exports.LEVEL_NOTE, findings: verdict.silenced || [] },
+        { name: "undeclared", level: exports.LEVEL_NOTE, findings: verdict.undeclared || [] },
+        { name: "unattributed", level: exports.LEVEL_NOTE, findings: verdict.unattributed || [] },
+        { name: "resolved", level: exports.LEVEL_NONE, findings: verdict.resolved || [] },
+    ];
+}
+function placements(verdict) {
+    const out = [];
+    for (const bucket of buckets(verdict)) {
+        for (const finding of bucket.findings) {
+            const at = placeOf(finding);
+            out.push({ bucket, finding, at, located: Boolean(at?.file && at.line), identity: identityOf(finding) });
+        }
+    }
+    return out;
+}
+const ruleTitle = /^(?:Strict constraint|Advisory constraint|Constraint|Exempted from constraint) (\S+?):? /;
+const becauseSuffix = /(?:^|\s)(?:Rule because|Because): (.+)$/;
+// The rule a finding reports under: the declared constraint's id when the finding is a
+// constraint verdict, the explainer's name otherwise. Read from the evidence the
+// explainer stamps, then from the title, never guessed from the description.
+function ruleOf(finding) {
+    for (const evidence of finding.evidence || []) {
+        if (evidence.fact?.startsWith("rule: "))
+            return evidence.fact.slice("rule: ".length);
+    }
+    const match = ruleTitle.exec(finding.title || "");
+    if (match)
+        return match[1];
+    return finding.source || "unknown";
+}
+// The `because` a declared rule carries. Findings from other explainers have no reason
+// the team wrote, so their description stands in.
+function reasonOf(finding) {
+    const match = becauseSuffix.exec(finding.description || "");
+    return match ? match[1].trim() : oneLine(finding.description || "");
+}
+// The reason the TEAM wrote, and only that. `reasonOf` falls back to the explainer's own
+// description, which is right for a SARIF rule description and wrong for an annotation:
+// it would repeat prose the summary already carries onto every line of the diff.
+function becauseOf(finding) {
+    const match = becauseSuffix.exec(finding.description || "");
+    return match ? match[1].trim() : "";
+}
+function actionOf(finding) {
+    return finding.suggested_actions?.[0] || "";
+}
+// Where a finding points. A measured span wins over a bare file: an annotation on the
+// import that caused a layer violation is worth having, and it is what the evidence now
+// carries. A file with no line still annotates — GitHub shows it at the head of the
+// file — but it never invents one.
+function placeOf(finding) {
+    if (finding.location?.file) {
+        const { file, line, end_line } = finding.location;
+        return { file, line, end_line };
+    }
+    const positioned = (finding.evidence || []).find((item) => item.file && item.line && item.line > 0);
+    if (positioned)
+        return positioned;
+    return (finding.evidence || []).find((item) => item.file);
+}
+// The path a host can open: the fact's file with the repository label a union snapshot
+// prefixes removed when the rest resolves on disk, and the file as recorded otherwise.
+// A wrong guess here pins a finding to a file the reviewer does not have, so the guess
+// is only made when the filesystem confirms it.
+function hostPath(file, root) {
+    if (!root)
+        return file;
+    if ((0, node_fs_1.existsSync)(node_path_1.default.join(root, file)))
+        return file;
+    const cut = file.indexOf("/");
+    if (cut > 0) {
+        const rest = file.slice(cut + 1);
+        if ((0, node_fs_1.existsSync)(node_path_1.default.join(root, rest)))
+            return rest;
+    }
+    return file;
+}
+// What the policy did with a finding's explainer: fail, warn (a fail-on explainer under
+// warn-only), or report.
+function policyOf(verdict, finding) {
+    const enforced = (verdict.policy?.fail_explainers || []).some((name) => name === finding.source);
+    if (enforced && verdict.policy?.warn_only)
+        return "warn";
+    if (enforced)
+        return "fail";
+    return "report";
+}
+// The ledger entry or exemption that kept a finding out of the gate, for the two buckets
+// that have one. Re-matched from the policy the verdict recorded, so the excuse named is
+// the one that applied.
+function excuseOf(verdict, bucket, finding) {
+    if (bucket === "suppressed") {
+        for (const entry of verdict.policy?.suppressions || []) {
+            if (suppresses(entry, finding)) {
+                const owner = entry.owner || "the ledger";
+                const date = entry.date || "an unstated date";
+                return `suppressed by ${owner} on ${date}: ${entry.reason || "no reason given"}`;
+            }
+        }
+        return "suppressed by the ledger";
+    }
+    if (bucket === "exempted") {
+        for (const evidence of finding.evidence || []) {
+            if (evidence.fact?.startsWith("rule: ") && evidence.detail?.startsWith("exempted by "))
+                return evidence.detail;
+        }
+        return "exempted by the declaration";
+    }
+    return "";
+}
+function suppresses(entry, finding) {
+    if (entry.finding_title_prefix)
+        return (finding.title || "").startsWith(entry.finding_title_prefix);
+    if (finding.source !== "constraints")
+        return false;
+    return ["Constraint", "Advisory constraint", "Strict constraint"].some((prefix) => (finding.title || "").startsWith(`${prefix} ${entry.rule} violated:`));
+}
+// The stable identity of a finding across snapshots — the same key the engine's diff
+// pairs findings on, so a fingerprint that leaves this action is the one the verdict was
+// computed with rather than a second derivation of it.
+function identityOf(finding) {
+    return (0, node_crypto_1.createHash)("sha256").update(findingKey(finding)).digest("hex").slice(0, 16);
+}
+// The engine's own separators, byte for byte: a NUL between the source and the title,
+// a unit separator between cited entities. A fingerprint derived from a different key
+// is a different identity, and the point of carrying one is that CI sees the identity
+// the verdict was computed with.
+const KEY_SEPARATOR = "\u0000";
+const ENTITY_SEPARATOR = "\u001f";
+function findingKey(finding) {
+    const source = finding.source || "";
+    if (source === "cycles")
+        return source + KEY_SEPARATOR + sortedEvidenceEntities(finding);
+    return source + KEY_SEPARATOR + normalizeTitle(finding.title || "");
+}
+function sortedEvidenceEntities(finding) {
+    return (finding.evidence || [])
+        .map((item) => item.fact || item.symbol || item.file || "")
+        .filter(Boolean)
+        .sort()
+        .join(ENTITY_SEPARATOR);
+}
+function normalizeTitle(title) {
+    return title.replace(/[0-9]+(\.[0-9]+)?/g, "#");
+}
+function oneLine(text) {
+    return text.split(/\s+/).filter(Boolean).join(" ");
+}
+function plural(n, one, many) {
+    return `${n} ${n === 1 ? one : many}`;
+}
+
+
+/***/ }),
+
+/***/ 5881:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.toSarif = toSarif;
+const findings_js_1 = __nccwpck_require__(9334);
+// SARIF 2.1.0, rendered from the verdict this run already has.
+//
+// Enola can write SARIF itself (`enola check -format sarif`), but a run emits ONE format,
+// and the action needs the JSON verdict for its outputs and summary. Asking for SARIF
+// too would mean a second `check` — a second snapshot of the whole repository — to
+// re-render numbers already in hand. So this writer is a port of the engine's
+// (`pkg/check/sarif.go`), down to the fingerprint scheme, and reads the same verdict.
+//
+// A rule per distinct rule id with the team's reason as its description, a result per
+// finding in every bucket, the region from the evidence the explainer measured, and the
+// finding's identity as a partial fingerprint so a host can follow one finding across
+// builds. Resolved findings carry no region: the position they had is on the baseline
+// side and the tree may no longer have that line.
+const SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json";
+const VERSION = "2.1.0";
+// Names the identity scheme, so a reader that stores fingerprints can tell this one from
+// a later scheme that replaces it.
+const FINGERPRINT_KEY = "enola/v1";
+function toSarif(verdict, enolaVersion, root) {
+    const places = (0, findings_js_1.placements)(verdict);
+    const reasons = new Map();
+    for (const placement of places) {
+        const id = (0, findings_js_1.ruleOf)(placement.finding);
+        if (!reasons.has(id))
+            reasons.set(id, (0, findings_js_1.reasonOf)(placement.finding));
+    }
+    const ids = [...reasons.keys()].sort();
+    const index = new Map(ids.map((id, i) => [id, i]));
+    const rules = ids.map((id) => ({ id, shortDescription: { text: reasons.get(id) || "" } }));
+    const results = places.map((placement) => {
+        const id = (0, findings_js_1.ruleOf)(placement.finding);
+        const result = {
+            ruleId: id,
+            ruleIndex: index.get(id) ?? 0,
+            level: placement.bucket.level,
+            message: { text: (0, findings_js_1.oneLine)(placement.finding.title) },
+            partialFingerprints: { [FINGERPRINT_KEY]: placement.identity },
+            properties: {
+                bucket: placement.bucket.name,
+                confidence: placement.finding.confidence,
+                policy: (0, findings_js_1.policyOf)(verdict, placement.finding),
+                source: placement.finding.source || "",
+            },
+        };
+        const action = (0, findings_js_1.actionOf)(placement.finding);
+        if (action)
+            result.properties.suggestedAction = action;
+        const at = placement.at;
+        if (placement.located && at?.file && at.line && placement.bucket.name !== "resolved") {
+            const region = { startLine: at.line };
+            if (at.column)
+                region.startColumn = at.column;
+            if (at.end_line)
+                region.endLine = at.end_line;
+            if (at.end_column)
+                region.endColumn = at.end_column;
+            result.locations = [
+                { physicalLocation: { artifactLocation: { uri: (0, findings_js_1.hostPath)(at.file, root) }, region } },
+            ];
+        }
+        const excuse = (0, findings_js_1.excuseOf)(verdict, placement.bucket.name, placement.finding);
+        if (excuse)
+            result.suppressions = [{ kind: "external", justification: excuse }];
+        return result;
+    });
+    return JSON.stringify({
+        $schema: SCHEMA,
+        version: VERSION,
+        runs: [
+            {
+                tool: {
+                    driver: {
+                        name: "enola",
+                        version: enolaVersion.replace(/^v/, ""),
+                        informationUri: "https://github.com/enola-labs/enola",
+                        rules,
+                    },
+                },
+                results,
+            },
+        ],
+    }, null, 2);
 }
 
 
@@ -34800,10 +35242,19 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.censusLine = censusLine;
+exports.intersectionLines = intersectionLines;
 exports.logVerdict = logVerdict;
 exports.writeSummary = writeSummary;
 const core = __importStar(__nccwpck_require__(7484));
 const verdict_js_1 = __nccwpck_require__(5187);
+const findings_js_1 = __nccwpck_require__(9334);
+// How many entries any one section prints. The rest are counted, never dropped in
+// silence: a rule declared over an existing codebase can produce thousands of findings
+// at once, and a job summary that tries to render them all exceeds GitHub's size limit
+// and writes nothing at all.
+const LIST_LIMIT = 25;
+const DELTA_LIMIT = 50;
 function short(sha) {
     return sha.slice(0, 8);
 }
@@ -34812,14 +35263,90 @@ function breachList(breaches) {
         .map((breach) => `- **${breach.fatal ? "fail" : "warn"}** — ${breach.measurement.count} ${breach.measurement.label}`)
         .join("\n");
 }
+function findingLine(finding) {
+    const at = (0, findings_js_1.placeOf)(finding);
+    const place = at?.file ? ` — \`${at.file}${at.line ? `:${at.line}` : ""}\`` : "";
+    return `- **${(0, findings_js_1.ruleOf)(finding)} · ${finding.confidence.toFixed(2)}** — ${finding.title}${place}`;
+}
 function findingList(findings) {
-    return findings
-        .map((finding) => {
-        const at = finding.location || finding.evidence?.find((item) => item.file);
-        const place = at?.file ? ` — \`${at.file}${"line" in at && at.line ? `:${at.line}` : ""}\`` : "";
-        return `- **${finding.source || "architecture"} · ${finding.confidence.toFixed(2)}** — ${finding.title}${place}`;
-    })
-        .join("\n");
+    const shown = findings.slice(0, LIST_LIMIT).map(findingLine);
+    if (findings.length > LIST_LIMIT) {
+        shown.push(`- …and ${findings.length - LIST_LIMIT} more, in the \`verdict-file\` output.`);
+    }
+    return shown.join("\n");
+}
+// What the run could not see, as Enola's own verdict prints it. Ported from
+// `pkg/check/census.go` so the sentence in the job summary is the sentence in the log.
+function censusLine(census) {
+    if (!census)
+        return "";
+    if (!census.recorded)
+        return "could not see: not recorded (snapshot predates the census)";
+    const parts = [];
+    if (census.files_excluded_by_ignore > 0 || census.dirs_excluded_by_ignore > 0) {
+        parts.push(`${(0, findings_js_1.plural)(census.files_excluded_by_ignore, "file", "files")} and ` +
+            `${(0, findings_js_1.plural)(census.dirs_excluded_by_ignore, "directory", "directories")} excluded by ignore globs`);
+    }
+    for (const skip of census.provider_skips || []) {
+        if (skip.reason) {
+            parts.push(`${skip.name} skipped (${skip.reason})`);
+            continue;
+        }
+        const causes = (skip.causes || []).map((cause) => `${cause.count} ${cause.cause}`);
+        if (causes.length)
+            parts.push(`${skip.name}: ${causes.join(", ")}`);
+    }
+    for (const kind of Object.keys(census.outside_graph || {}).sort()) {
+        const count = (census.outside_graph || {})[kind];
+        if (count > 0)
+            parts.push(`${count} ${kind} targets outside the graph`);
+    }
+    if (census.dead_exemptions > 0) {
+        parts.push((0, findings_js_1.plural)(census.dead_exemptions, "exemption matching nothing", "exemptions matching nothing"));
+    }
+    if (census.unused_suppressions > 0) {
+        parts.push((0, findings_js_1.plural)(census.unused_suppressions, "unused suppression", "unused suppressions"));
+    }
+    for (const overlap of census.provider_overlap || []) {
+        if (overlap.conflict > 0 || overlap.respelled > 0) {
+            parts.push(`${overlap.name}: ${overlap.conflict} relations contradict the extractor, ` +
+                `${overlap.respelled} respelled, ${overlap.already_resolved} repeated`);
+        }
+    }
+    if (census.dynamic_feature_classes > 0) {
+        parts.push((0, findings_js_1.plural)(census.dynamic_feature_classes, "class carrying a dynamic dispatch", "classes carrying a dynamic dispatch"));
+    }
+    return parts.length ? `could not see: ${parts.join("; ")}` : "could not see: nothing";
+}
+// What a partial verdict graded and what it could not, in the engine's own words.
+function intersectionLines(verdict) {
+    const grading = verdict.intersection_grading;
+    if (!grading)
+        return [];
+    const shared = [...(grading.shared_extractors || []), ...(grading.shared_providers || []).map((p) => `${p} provider`)];
+    const lines = [
+        "**Partial verdict.** The two snapshots were produced by different producer sets, so only facts from " +
+            "producers present in BOTH snapshots were graded. This is NOT a full verdict.",
+        `Graded over the shared producer set (${(0, findings_js_1.plural)(shared.length, "family", "families")}: ${shared.join(", ")}).`,
+    ];
+    for (const producer of grading.excluded || []) {
+        const label = producer.kind === "provider" ? `${producer.name} provider` : producer.name;
+        lines.push(`Excluded from grading: ${label} (${producer.lacked_by} lacks it) — ${exclusionTally(producer)}.`);
+    }
+    lines.push("A regression among an excluded producer's facts cannot be graded here and is NOT reported.");
+    return lines;
+}
+function exclusionTally(producer) {
+    const parts = [];
+    const side = (label, factCount, findingCount) => {
+        if (factCount === 0 && findingCount === 0)
+            return;
+        const facts = (0, findings_js_1.plural)(factCount, "fact", "facts");
+        parts.push(findingCount > 0 ? `${facts} and ${(0, findings_js_1.plural)(findingCount, "finding", "findings")} ${label}` : `${facts} ${label}`);
+    };
+    side("on the baseline side", producer.baseline_facts_excluded, producer.baseline_findings_excluded);
+    side("on the current side", producer.current_facts_excluded, producer.current_findings_excluded);
+    return parts.length ? `${parts.join(", ")} not graded` : "no facts on either side matched it";
 }
 // The step log, not the job summary. A gate whose successful run prints nothing reads as
 // a gate that did not run — the verdict has to be visible where the work appears to happen.
@@ -34828,6 +35355,9 @@ function logVerdict(verdict) {
     const advisories = verdict.advisories || [];
     core.info(`Verdict: ${verdict.status} — ${(0, verdict_js_1.regressionCount)(verdict)} regression(s), ${advisories.length} advisory, ` +
         `${(verdict.resolved || []).length} resolved`);
+    const census = censusLine(verdict.census);
+    if (census)
+        core.info(`  ${census}`);
     for (const breach of verdict.breaches || []) {
         const line = `${breach.measurement.count} ${breach.measurement.label}`;
         if (breach.fatal)
@@ -34837,8 +35367,21 @@ function logVerdict(verdict) {
     }
     core.info(`Delta: facts +${verdict.facts_added}/-${verdict.facts_removed}, ` +
         `edges +${verdict.edges_added}/-${verdict.edges_removed}`);
+    // Every bucket that carries something, so nothing the engine reported is invisible in
+    // the log even when this action has no section of its own for it.
+    const others = (0, findings_js_1.buckets)(verdict)
+        .filter((bucket) => !["failure", "advisory", "resolved"].includes(bucket.name) && bucket.findings.length)
+        .map((bucket) => `${bucket.findings.length} ${bucket.name}`);
+    if (others.length)
+        core.info(`Also reported: ${others.join(", ")}`);
     for (const warning of verdict.comparability_warnings || [])
         core.warning(warning);
+    // A partial verdict is a real pass or fail over PART of the graph. Warned, not merely
+    // logged: a green check that graded half the producers must not read as a full one.
+    if ((0, verdict_js_1.isPartial)(verdict)) {
+        for (const line of intersectionLines(verdict))
+            core.warning(line.replace(/\*\*/g, ""));
+    }
     // Loud, and a warning rather than an info line: this run had no grounds to fail, so a
     // green check on it means "not graded", not "graded clean".
     if ((0, verdict_js_1.enforcesNothing)(verdict)) {
@@ -34848,36 +35391,68 @@ function logVerdict(verdict) {
     }
     for (const [label, findings] of [["Regression", failures], ["Advisory", advisories]]) {
         for (const finding of findings) {
-            const at = finding.location || finding.evidence?.find((item) => item.file);
-            const place = at?.file ? ` (${at.file}${"line" in at && at.line ? `:${at.line}` : ""})` : "";
-            core.info(`  ${label}: ${finding.source || "architecture"} · ${finding.confidence.toFixed(2)} — ${finding.title}${place}`);
+            const at = (0, findings_js_1.placeOf)(finding);
+            const place = at?.file ? ` (${at.file}${at.line ? `:${at.line}` : ""})` : "";
+            core.info(`  ${label}: ${(0, findings_js_1.ruleOf)(finding)} · ${finding.confidence.toFixed(2)} — ${finding.title}${place}`);
         }
     }
 }
-async function writeSummary(verdict, baseSha, headSha, version) {
-    const failures = verdict.failures || [];
-    const advisories = verdict.advisories || [];
-    const breaches = verdict.breaches || [];
+function factLine(fact) {
+    return `- \`${fact.kind}\` ${fact.name}${fact.file ? ` — \`${fact.file}${fact.line ? `:${fact.line}` : ""}\`` : ""}`;
+}
+function edgeLine(edge) {
+    return `- \`${edge.source}\` —${edge.kind}→ \`${edge.target}\``;
+}
+function deltaSection(title, entries, line) {
+    if (!entries.length)
+        return "";
+    const shown = entries.slice(0, DELTA_LIMIT).map(line);
+    if (entries.length > DELTA_LIMIT)
+        shown.push(`- …and ${entries.length - DELTA_LIMIT} more.`);
+    return `<details><summary>${title} (${entries.length})</summary>\n\n${shown.join("\n")}\n\n</details>\n\n`;
+}
+// The one line a reader skims, and the mark beside it.
+//
+// Every branch here is a distinct thing that happened, and collapsing any two would make
+// the summary say something untrue: a warn-only run that reported regressions is not "no
+// structural regression", a run with no policy did not look and find nothing, and a
+// partial verdict is not a verdict over the whole graph.
+function headlineOf(verdict) {
     // Counts breaches, not just findings: a spillover-only failure has no failing finding,
     // and "0 structural regression(s) introduced" over a red job is worse than no summary.
     const regressions = (0, verdict_js_1.regressionCount)(verdict);
-    const icon = verdict.status === "clean" ? "✅" : verdict.status === "regression" ? "❌" : "⚠️";
+    const advisories = (verdict.advisories || []).length;
     const unenforced = (0, verdict_js_1.enforcesNothing)(verdict);
-    const title = verdict.status === "clean"
-        ? regressions ? `${regressions} regression(s) reported in warn-only mode`
-            : unenforced && advisories.length ? `${advisories.length} finding(s) reported, nothing enforced`
-                : "No structural regression"
-        : verdict.status === "regression" ? `${regressions} structural regression(s) introduced`
-            : verdict.status === "incomparable" ? "Enola refused to grade incomparable snapshots"
-                : "Enola could not complete the architecture check";
-    let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
-    markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
-    if (unenforced) {
-        markdown += "> **No policy set.** Nothing in this run could fail the job — every finding below is a " +
-            "report. Set `fail-on` (e.g. `fail-on: layers`) or `max-spillover` to make this a gate.\n\n";
-    }
-    if (failures.length)
-        markdown += `## Regressions\n\n${findingList(failures)}\n\n`;
+    const passed = verdict.status === "clean" || verdict.status === "partial_clean";
+    const regressed = verdict.status === "regression" || verdict.status === "partial_regression";
+    // A partial pass gets the mark of an outcome that needs reading, not the tick of one
+    // that does not: it graded part of the graph.
+    const icon = passed ? ((0, verdict_js_1.isPartial)(verdict) ? "⚠️" : "✅") : regressed ? "❌" : "⚠️";
+    let title;
+    if (passed && regressions)
+        title = `${regressions} regression(s) reported in warn-only mode`;
+    else if (passed && unenforced && advisories)
+        title = `${advisories} finding(s) reported, nothing enforced`;
+    else if (passed)
+        title = "No structural regression";
+    else if (regressed)
+        title = `${regressions} structural regression(s) introduced`;
+    else if (verdict.status === "incomparable")
+        title = "Enola refused to grade incomparable snapshots";
+    else
+        title = "Enola could not complete the architecture check";
+    return { icon, title: (0, verdict_js_1.isPartial)(verdict) ? `${title} (partial verdict)` : title };
+}
+// One section per bucket that carries something, in the order a reader needs them: what
+// failed, why the job is red, what was merely reported, and then the four kinds of
+// finding Enola deliberately refuses to fold into any of those.
+function findingSections(verdict) {
+    const unenforced = (0, verdict_js_1.enforcesNothing)(verdict);
+    const advisories = verdict.advisories || [];
+    const breaches = verdict.breaches || [];
+    let markdown = "";
+    if ((verdict.failures || []).length)
+        markdown += `## Regressions\n\n${findingList(verdict.failures || [])}\n\n`;
     // Ahead of advisories: a fatal breach is why the job is red, and it must not sit below
     // findings that did not fail it.
     if (breaches.length)
@@ -34885,13 +35460,78 @@ async function writeSummary(verdict, baseSha, headSha, version) {
     if (advisories.length) {
         markdown += `## ${unenforced ? "Findings (reported, not enforced)" : "Advisory findings"}\n\n${findingList(advisories)}\n\n`;
     }
+    // A rule that arrived with this change, over code the change did not touch. Its own
+    // section because folding it into advisories would report "this change introduced
+    // 3,980 findings" about a pull request that introduced one declaration.
+    const declared = verdict.declared || [];
+    if (declared.length) {
+        markdown += `## Declared by this change (${declared.length})\n\nThe rules are new; the code they name is not. ` +
+            `Not counted as regressions.\n\n${findingList(declared)}\n\n`;
+    }
+    const excused = [...(verdict.suppressed || []), ...(verdict.exempted || [])];
+    if (excused.length) {
+        markdown += `## Excused (${excused.length})\n\nSigned away by the ledger or exempted by the declaration — ` +
+            `reported so the excuse stays auditable.\n\n${findingList(excused)}\n\n`;
+    }
+    // Breaches that stopped being reported without being fixed, and findings that moved
+    // with no structural cause. Enola holds them out of "resolved" on purpose: a rule that
+    // stopped asking the question is not an answer to it.
+    const notGraded = [
+        ["Silenced — the code left the component the rule binds", verdict.silenced || []],
+        ["Undeclared — the rule changed, the code did not", verdict.undeclared || []],
+        ["Unattributed — this pair of snapshots cannot judge them", verdict.unattributed || []],
+        ["Incidental — moved with no structural cause", verdict.incidental || []],
+        ["Descriptive — describes the graph rather than complains about it", verdict.descriptive || []],
+    ].filter(([, findings]) => findings.length);
+    if (notGraded.length) {
+        markdown += "## Reported, not graded\n\n";
+        for (const [label, findings] of notGraded) {
+            markdown += `**${label}** (${findings.length})\n\n${findingList(findings)}\n\n`;
+        }
+    }
+    return markdown;
+}
+// The delta table, and the complete delta under it on request. Enola's own --detail
+// prints that under the text verdict; the JSON the action reads carries the same delta,
+// so the input renders it here rather than asking the engine for a second run.
+function deltaMarkdown(verdict, detail) {
+    const findings = (verdict.failures || []).length + (verdict.advisories || []).length;
+    let markdown = `## Architectural change\n\n| | Added | Removed |\n|---|---:|---:|\n`;
+    markdown += `| Facts | ${verdict.facts_added} | ${verdict.facts_removed} |\n`;
+    markdown += `| Edges | ${verdict.edges_added} | ${verdict.edges_removed} |\n`;
+    markdown += `| Findings | ${findings} | ${(verdict.resolved || []).length} |\n`;
+    if ((0, verdict_js_1.isPartial)(verdict)) {
+        markdown += `\n${(0, verdict_js_1.ungradedFacts)(verdict)} fact(s) and ${(0, verdict_js_1.ungradedFindings)(verdict)} finding(s) from ` +
+            `${(0, findings_js_1.plural)((0, verdict_js_1.excludedProducers)(verdict).length, "producer", "producers")} were not graded.\n`;
+    }
+    if (detail && verdict.diff) {
+        markdown += `\n## Full delta\n\n`;
+        markdown += deltaSection("Edges added", verdict.diff.edges_added || [], edgeLine);
+        markdown += deltaSection("Edges removed", verdict.diff.edges_removed || [], edgeLine);
+        markdown += deltaSection("Facts added", verdict.diff.facts_added || [], factLine);
+        markdown += deltaSection("Facts removed", verdict.diff.facts_removed || [], factLine);
+    }
+    return markdown;
+}
+async function writeSummary(verdict, baseSha, headSha, version, detail = false) {
+    const { icon, title } = headlineOf(verdict);
+    let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
+    markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
+    const census = censusLine(verdict.census);
+    if (census)
+        markdown += `_${census}_\n\n`;
+    const intersection = intersectionLines(verdict);
+    if (intersection.length)
+        markdown += `${intersection.map((line) => `> ${line}`).join("\n>\n")}\n\n`;
+    if ((0, verdict_js_1.enforcesNothing)(verdict)) {
+        markdown += "> **No policy set.** Nothing in this run could fail the job — every finding below is a " +
+            "report. Set `fail-on` (e.g. `fail-on: layers`) or `max-spillover` to make this a gate.\n\n";
+    }
+    markdown += findingSections(verdict);
     if (verdict.comparability_warnings?.length) {
         markdown += `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
     }
-    markdown += `## Architectural change\n\n| | Added | Removed |\n|---|---:|---:|\n`;
-    markdown += `| Facts | ${verdict.facts_added} | ${verdict.facts_removed} |\n`;
-    markdown += `| Edges | ${verdict.edges_added} | ${verdict.edges_removed} |\n`;
-    markdown += `| Findings | ${failures.length + advisories.length} | ${(verdict.resolved || []).length} |\n`;
+    markdown += deltaMarkdown(verdict, detail);
     await core.summary.addRaw(markdown).write();
 }
 

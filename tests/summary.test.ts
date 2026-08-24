@@ -99,3 +99,165 @@ describe("an unenforced run", () => {
     expect(markdown).not.toContain("No policy set.");
   });
 });
+
+describe("a partial verdict", () => {
+  // Enola grades the intersection of the producers both snapshots share instead of
+  // declining. It is a real pass — of part of the graph — and a summary that printed it
+  // as a whole one would be the most expensive kind of wrong: a green check over facts
+  // nobody compared.
+  const partial: Partial<Verdict> = {
+    status: "partial_clean",
+    intersection_grading: {
+      shared_extractors: ["typescript", "mdintent"],
+      excluded: [
+        {
+          name: "ruby",
+          kind: "extractor",
+          lacked_by: "baseline",
+          baseline_facts_excluded: 0,
+          current_facts_excluded: 2,
+          baseline_findings_excluded: 0,
+          current_findings_excluded: 1,
+        },
+      ],
+    },
+  };
+
+  it("marks the headline and names what went ungraded", async () => {
+    await writeSummary(verdict(partial), "base", "head", "1.2.3");
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("No structural regression (partial verdict)");
+    expect(markdown).toContain("Partial verdict.");
+    expect(markdown).toContain("Excluded from grading: ruby (baseline lacks it)");
+    expect(markdown).toContain("2 facts and 1 finding on the current side not graded");
+    expect(markdown).toContain("A regression among an excluded producer's facts cannot be graded here and is NOT reported.");
+    expect(markdown).toContain("2 fact(s) and 1 finding(s) from 1 producer were not graded.");
+  });
+
+  it("keeps the failing headline when the graded part regressed", async () => {
+    await writeSummary(
+      verdict({ ...partial, status: "partial_regression", failures: [{ title: "Cycle", source: "cycles", confidence: 1 }] }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("1 structural regression(s) introduced (partial verdict)");
+  });
+});
+
+describe("the buckets Enola splits out of advisories", () => {
+  it("gives a newly declared rule its own section rather than counting it as a regression", async () => {
+    await writeSummary(
+      verdict({ declared: [{ title: "Constraint storage-stays-home violated: here", confidence: 1 }] }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("## Declared by this change (1)");
+    expect(markdown).toContain("The rules are new; the code they name is not.");
+    expect(markdown).toContain("No structural regression");
+  });
+
+  it("keeps what a ledger excused auditable", async () => {
+    await writeSummary(
+      verdict({ suppressed: [{ title: "s", confidence: 1 }], exempted: [{ title: "e", confidence: 1 }] }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    expect(addRaw.mock.calls[0][0] as string).toContain("## Excused (2)");
+  });
+
+  // A breach that stopped being reported because its rule was deleted is not a fix, and
+  // must never appear under "resolved".
+  it("reports what stopped being asked without calling it good news", async () => {
+    await writeSummary(
+      verdict({
+        silenced: [{ title: "left the component", confidence: 1 }],
+        undeclared: [{ title: "rule deleted", confidence: 1 }],
+      }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("## Reported, not graded");
+    expect(markdown).toContain("Silenced — the code left the component the rule binds");
+    expect(markdown).toContain("Undeclared — the rule changed, the code did not");
+  });
+
+  it("caps a section that would otherwise not fit, and says how many it held back", async () => {
+    const declared = Array.from({ length: 40 }, (_, i) => ({ title: `d${i}`, confidence: 1 }));
+    await writeSummary(verdict({ declared }), "base", "head", "1.2.3");
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("…and 15 more, in the `verdict-file` output.");
+  });
+});
+
+describe("what the run could not see", () => {
+  it("prints the census under the headline, on a pass", async () => {
+    await writeSummary(
+      verdict({
+        census: {
+          recorded: true,
+          files_excluded_by_ignore: 12,
+          dirs_excluded_by_ignore: 1,
+          dead_exemptions: 0,
+          unused_suppressions: 2,
+          dynamic_feature_classes: 0,
+          provider_skips: [{ name: "eslint", reason: "not installed" }],
+        },
+      }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("could not see: 12 files and 1 directory excluded by ignore globs");
+    expect(markdown).toContain("eslint skipped (not installed)");
+    expect(markdown).toContain("2 unused suppressions");
+  });
+
+  it("says so plainly when it saw everything it was asked to", async () => {
+    await writeSummary(
+      verdict({
+        census: {
+          recorded: true,
+          files_excluded_by_ignore: 0,
+          dirs_excluded_by_ignore: 0,
+          dead_exemptions: 0,
+          unused_suppressions: 0,
+          dynamic_feature_classes: 0,
+        },
+      }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    expect(addRaw.mock.calls[0][0] as string).toContain("could not see: nothing");
+  });
+});
+
+// `detail` used to pass --detail to a run that was reading JSON, where Enola ignores it:
+// the input did nothing at all. The delta was in the verdict the whole time.
+describe("the detail input", () => {
+  const diff = {
+    edges_added: [{ source: "a", kind: "imports", target: "b" }],
+    facts_removed: [{ kind: "symbol", name: "Old", file: "src/a.ts", line: 3 }],
+  };
+
+  it("renders the delta from the verdict when asked", async () => {
+    await writeSummary(verdict({ diff }), "base", "head", "1.2.3", true);
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("## Full delta");
+    expect(markdown).toContain("`a` —imports→ `b`");
+    expect(markdown).toContain("`symbol` Old");
+  });
+
+  it("stays out of the summary otherwise", async () => {
+    await writeSummary(verdict({ diff }), "base", "head", "1.2.3");
+    expect(addRaw.mock.calls[0][0] as string).not.toContain("## Full delta");
+  });
+});
