@@ -35242,6 +35242,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.lawLine = lawLine;
 exports.censusLine = censusLine;
 exports.intersectionLines = intersectionLines;
 exports.logVerdict = logVerdict;
@@ -35274,6 +35275,55 @@ function findingList(findings) {
         shown.push(`- …and ${findings.length - LIST_LIMIT} more, in the \`verdict-file\` output.`);
     }
     return shown.join("\n");
+}
+// Go's %.0f rounds half to even; JavaScript's Math.round rounds half up. The excuse
+// share is the only place this action formats a percentage, and one line that reads
+// differently here than in the step log would defeat the point of porting it at all.
+function roundHalfEven(value) {
+    const floor = Math.floor(value);
+    const rest = value - floor;
+    if (rest > 0.5)
+        return floor + 1;
+    if (rest < 0.5)
+        return floor;
+    return floor % 2 === 0 ? floor : floor + 1;
+}
+// The modes a rule may be declared in, in the order the line names them. Only printed
+// when more than one mode is present: a repository running one mode should not have to
+// read a parenthetical to learn it.
+const LAW_MODES = ["ratchet", "strict", "advisory", "notify"];
+// How much of the declared law is being excused, as Enola's own verdict prints it.
+// Ported from `pkg/check/ledger.go`, and it renders beside the census line for the same
+// reason that one exists: a pass under a law whose breaches are mostly signed away is
+// not the same run as a pass under one nobody has had to excuse.
+function lawLine(law) {
+    if (!law || !law.rules)
+        return "";
+    const parts = [(0, findings_js_1.plural)(law.rules, "rule", "rules")];
+    const modes = LAW_MODES.filter((mode) => (law.by_mode || {})[mode] > 0).map((mode) => `${(law.by_mode || {})[mode]} ${mode}`);
+    if (modes.length > 1)
+        parts[0] += ` (${modes.join(", ")})`;
+    const raised = law.breaches + law.exempted;
+    if (raised === 0) {
+        parts.push("no breaches");
+    }
+    else {
+        parts.push((0, findings_js_1.plural)(raised, "breach", "breaches"));
+        if (law.excused === 0) {
+            parts.push("none excused");
+        }
+        else {
+            parts.push(`${law.excused} excused (${roundHalfEven((law.excused / raised) * 100)}%)`);
+            if (law.oldest_excuse_days)
+                parts.push(`oldest excuse ${(0, findings_js_1.plural)(law.oldest_excuse_days, "day", "days")}`);
+        }
+    }
+    if (law.idle_excuses)
+        parts.push((0, findings_js_1.plural)(law.idle_excuses, "excuse matched nothing", "excuses matched nothing"));
+    if (law.undatable_excuses) {
+        parts.push((0, findings_js_1.plural)(law.undatable_excuses, "excuse with an unreadable date", "excuses with an unreadable date"));
+    }
+    return `law: ${parts.join(" · ")}`;
 }
 // What the run could not see, as Enola's own verdict prints it. Ported from
 // `pkg/check/census.go` so the sentence in the job summary is the sentence in the log.
@@ -35358,6 +35408,9 @@ function logVerdict(verdict) {
     const census = censusLine(verdict.census);
     if (census)
         core.info(`  ${census}`);
+    const law = lawLine(verdict.law);
+    if (law)
+        core.info(`  ${law}`);
     for (const breach of verdict.breaches || []) {
         const line = `${breach.measurement.count} ${breach.measurement.label}`;
         if (breach.fatal)
@@ -35520,6 +35573,9 @@ async function writeSummary(verdict, baseSha, headSha, version, detail = false) 
     const census = censusLine(verdict.census);
     if (census)
         markdown += `_${census}_\n\n`;
+    const law = lawLine(verdict.law);
+    if (law)
+        markdown += `_${law}_\n\n`;
     const intersection = intersectionLines(verdict);
     if (intersection.length)
         markdown += `${intersection.map((line) => `> ${line}`).join("\n>\n")}\n\n`;

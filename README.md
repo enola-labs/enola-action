@@ -91,6 +91,8 @@ A failing run, with `fail-on: layers`. The job summary, verbatim:
 
 The italic line under the table is Enola's census: what the run could not see, printed on every outcome including a pass, so a green check over a graph that skipped the files the change touched cannot be mistaken for one that resolved them.
 
+A repository that declares constraint rules gets a second italic line beside it - the law's excuse rate, e.g. `law: 34 rules (28 ratchet, 4 advisory, 2 strict) - 12 breaches - 5 excused (42%) - oldest excuse 214 days`. It reports how many of the declared rules' breaches were signed away by a suppression or an exemption rather than fixed, and names the excuses that no longer match anything. It changes no exit code: a rule whose breaches are mostly excused is one to reconsider, and that judgement is the reader's. Repositories that declare no rules get no line.
+
 The same finding also lands on `storage/storage.go` as a source annotation, so it shows up in the **Files changed** tab next to the import that caused it - on the line the extractor measured, when it measured one. Without `fail-on: layers` the identical finding appears under **Findings (reported, not enforced)**, annotates as a warning, and the job passes.
 
 Two traps worth knowing before you set `fail-on`:
