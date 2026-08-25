@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/enola-labs/enola-action)](https://github.com/enola-labs/enola-action/releases)
 [![License](https://img.shields.io/github/license/enola-labs/enola-action)](LICENSE)
 
-Architectural regression testing for GitHub pull requests, powered by [enola](https://github.com/enola-labs/enola). The action compares the exact pull-request base with the checked-out commit, reports new structural findings as source annotations, and writes an architecture delta to the job summary.
+**Catch architecture regressions before they merge.** Enola Architecture Check compares the exact pull-request base with the checked-out commit, reports only the structural findings introduced by the pull request as source annotations, and writes the complete architecture delta to the job summary. Powered by [enola](https://github.com/enola-labs/enola).
 
 ```yaml
 name: Architecture
@@ -22,6 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Report-only by default. Add fail-on below to enforce a policy.
       - uses: enola-labs/enola-action@v2
 ```
 
@@ -215,7 +216,8 @@ The action is the CI face of [enola](https://github.com/enola-labs/enola), an Ap
 
 ```bash
 enola baseline pin      # freeze the architecture before you edit
-enola check             # exit 1 on a structural regression
+enola check                         # report the structural delta; exit 0
+enola check --fail-on=layers        # exit 1 on a new declared-layer violation
 ```
 
 Same explainers, same exit codes. What the action adds is the pull-request wiring: it resolves the exact base commit, pins and grades both sides itself - no baseline artifact to publish and restore - turns new findings into source annotations, and writes the delta to the job summary. Failing findings annotate as errors, advisory ones and rules your change newly declared as warnings, on the line the extractor measured - capped at ten per level, with a notice saying how many were held back so a cap never reads as "that was all of them". Findings with no position are counted rather than pinned to a line nobody wrote. The `verdict-file` output always holds the complete verdict, every bucket included.
