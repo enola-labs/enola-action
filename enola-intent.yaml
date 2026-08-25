@@ -28,3 +28,32 @@ layers:
   - {name: policy,   paths: ["src/policy/**"]}
   - {name: platform, paths: ["src/platform/**"]}
   - {name: core,     paths: ["src/core/**"]}
+
+# The external packages this action pulls in, and what each is for. The manifests
+# extractor measures which of them are declared, pinned and resolved; nothing measures
+# WHY one is here, which is the whole of what this section adds — so a package that
+# arrives without a reason to be in this list is a finding rather than a merge.
+#
+# The runtime tree is deliberately tiny. This action executes on other people's runners
+# from a committed bundle, so every dependency here is one more thing that would ship
+# with it, and the two marked safety_path are the ones a compromise would ship
+# ARBITRARY code through rather than merely break the job.
+dependencies:
+  - name: "@actions/core"
+    purpose: "read inputs, set outputs, write the job summary and the source annotations"
+  - name: "@actions/exec"
+    purpose: "run the enola binary as a subprocess and capture its JSON verdict"
+  - name: "@actions/tool-cache"
+    purpose: "download and cache the pinned enola release, and the checksum file it is verified against"
+    safety_path: true
+  - name: "@types/node"
+    purpose: "Node type definitions for the build"
+  - name: "@vercel/ncc"
+    purpose: "bundle src/ into the committed dist/index.js GitHub executes"
+    safety_path: true
+  - name: prettier
+    purpose: "source formatting"
+  - name: typescript
+    purpose: "the compiler behind the typecheck gate"
+  - name: vitest
+    purpose: "the test runner"

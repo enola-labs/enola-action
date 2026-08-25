@@ -7,8 +7,8 @@ const { write, addRaw } = vi.hoisted(() => {
 });
 vi.mock("@actions/core", () => ({ summary: { addRaw } }));
 
-import { writeSummary } from "../src/report/summary.js";
-import { Verdict } from "../src/core/types.js";
+import { lawLine, writeSummary } from "../src/report/summary.js";
+import { LedgerSummary, Verdict } from "../src/core/types.js";
 
 function verdict(overrides: Partial<Verdict>): Verdict {
   return { status: "clean", edges_added: 1, edges_removed: 2, facts_added: 3, facts_removed: 4, ...overrides };
@@ -259,5 +259,71 @@ describe("the detail input", () => {
   it("stays out of the summary otherwise", async () => {
     await writeSummary(verdict({ diff }), "base", "head", "1.2.3");
     expect(addRaw.mock.calls[0][0] as string).not.toContain("## Full delta");
+  });
+});
+
+describe("lawLine", () => {
+  const law = (overrides: Partial<LedgerSummary>): LedgerSummary => ({
+    rules: 1,
+    breaches: 0,
+    suppressed: 0,
+    exempted: 0,
+    excused: 0,
+    ...overrides,
+  });
+
+  // A repository that declares no rules is unasked, not clean: a zeroed ledger would
+  // read as a law with nothing wrong with it.
+  it("renders nothing when no rules are declared", () => {
+    expect(lawLine(undefined)).toBe("");
+    expect(lawLine(null)).toBe("");
+    expect(lawLine(law({ rules: 0 }))).toBe("");
+  });
+
+  it("names a law nobody has had to excuse", () => {
+    expect(lawLine(law({ rules: 2 }))).toBe("law: 2 rules · no breaches");
+  });
+
+  // The mode breakdown only appears when it discriminates.
+  it("breaks down modes only when more than one is present", () => {
+    expect(lawLine(law({ rules: 2, by_mode: { ratchet: 2 } }))).toBe("law: 2 rules · no breaches");
+    expect(lawLine(law({ rules: 3, by_mode: { ratchet: 1, advisory: 1, strict: 1 } }))).toBe(
+      "law: 3 rules (1 ratchet, 1 strict, 1 advisory) · no breaches",
+    );
+  });
+
+  it("reports the excuse rate over every breach the law raised", () => {
+    // 2 excused over 4 raised: 3 reported plus 1 carved out by an exemption.
+    const line = lawLine(law({ rules: 2, breaches: 3, exempted: 1, suppressed: 1, excused: 2, oldest_excuse_days: 236 }));
+    expect(line).toBe("law: 2 rules · 4 breaches · 2 excused (50%) · oldest excuse 236 days");
+  });
+
+  it("says none excused rather than nothing", () => {
+    expect(lawLine(law({ rules: 1, breaches: 1 }))).toBe("law: 1 rule · 1 breach · none excused");
+  });
+
+  it("names idle and undatable excuses", () => {
+    const line = lawLine(law({ rules: 1, idle_excuses: 2, undatable_excuses: 1 }));
+    expect(line).toBe(
+      "law: 1 rule · no breaches · 2 excuses matched nothing · 1 excuse with an unreadable date",
+    );
+  });
+
+  // Go's %.0f rounds half to even, so 1 excused of 200 prints 0%, not 1%. The line is
+  // ported to read identically in the job summary and in the step log.
+  it("rounds the share the way Go formats it", () => {
+    expect(lawLine(law({ rules: 1, breaches: 200, excused: 1, suppressed: 1 }))).toContain("1 excused (0%)");
+    expect(lawLine(law({ rules: 1, breaches: 200, excused: 3, suppressed: 3 }))).toContain("3 excused (2%)");
+  });
+
+  it("renders into the job summary beside the census line", async () => {
+    await writeSummary(
+      verdict({ law: law({ rules: 1, breaches: 1, suppressed: 1, excused: 1, oldest_excuse_days: 5 }) }),
+      "abcdef1234567890",
+      "1234567890abcdef",
+      "1.2.3",
+    );
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("_law: 1 rule · 1 breach · 1 excused (100%) · oldest excuse 5 days_");
   });
 });

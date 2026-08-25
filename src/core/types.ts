@@ -119,6 +119,26 @@ export interface Census {
   provider_overlap?: ProviderOverlapLine[];
 }
 
+// How much of the declared law is being EXCUSED rather than obeyed, as the verdict
+// reports it. Absent entirely when the repository declares no rules: undeclared is
+// unasked, and a zeroed ledger would read as a law with nothing wrong with it.
+export interface LedgerSummary {
+  rules: number;
+  // Declared rules per enforcement mode. Advisory rules are counted here rather than
+  // folded into the excuse rate: declaring a rule report-only is a statement about the
+  // RULE, not an override of a finding.
+  by_mode?: Record<string, number>;
+  breaches: number;
+  suppressed: number;
+  exempted: number;
+  excused: number;
+  oldest_excuse_days?: number;
+  undatable_excuses?: number;
+  // Signed excuses that excused nothing in this snapshot — a signature standing over a
+  // breach that was since fixed, moved, or stopped being selected.
+  idle_excuses?: number;
+}
+
 // A producer present on one side only, with what its exclusion cost the grading.
 export interface ExcludedProducer {
   name: string;
@@ -142,6 +162,7 @@ export interface Verdict {
   status: VerdictStatus;
   policy?: Policy;
   census?: Census | null;
+  law?: LedgerSummary | null;
   // What the change introduced, by bucket. Failures and advisories are the two the gate
   // is about; the rest exist because Enola refuses to fold them into either — a rule
   // that was newly DECLARED over code nobody touched is not a regression this change
