@@ -26,12 +26,12 @@ jobs:
       - uses: enola-labs/enola-action@v2
 ```
 
-With no inputs, **nothing fails the job**. Enola runs all eighteen of its checks - it calls them **explainers** - reports everything they find on the pull request, and stays green: the workflow above is a report, and the summary says so in as many words. One input turns it into a gate:
+With no inputs, **nothing fails the job**. Enola runs every one of its checks - it calls them **explainers** - reports everything they find on the pull request, and stays green: the workflow above is a report, and the summary says so in as many words. One input turns it into a gate:
 
 ```yaml
       - uses: enola-labs/enola-action@v2
         with:
-          fail-on: layers      # …or cycles, intent, constraints, or any of the eighteen
+          fail-on: layers      # …or cycles, intent, constraints, or any other explainer
 ```
 
 That is deliberate. What counts as an architectural regression is a decision about *your* codebase - a dependency cycle is a defect in one repository and ordinary practice in the next - so the action never picks one for you. See [what fails the job](#what-fails-the-job).
@@ -50,7 +50,7 @@ Two separate things decide that: what Enola **finds**, and what your inputs **fa
 | `max-spillover` | fails when the change reached more than N packages outside the `target` you declared. This is not a finding, and it can fail a job whose findings are all clean |
 | `warn-only` | downgrades findings and spillover breaches to warnings. It does **not** suppress a check that could not run: a missing base still fails, and a base Enola cannot compare against at all still makes it decline to grade (a base that differs only in *who produced the facts* is graded partially instead - see [below](#when-enola-grades-only-part-of-the-graph)) |
 
-**`fail-on` accepts all eighteen explainer names**, not just the two or three that show up in most examples. A name Enola does not recognise stops the run and says so, rather than matching nothing: matching is exact, so `CYCLES` is not `cycles`, and a list mixing valid and invalid names is refused whole. The `verdict-file` output holds the policy that actually ran. Each row below is a real value you can paste into `with:`:
+**`fail-on` accepts every explainer name** listed in [docs/EXPLAINERS.md](https://github.com/enola-labs/enola/blob/main/docs/EXPLAINERS.md), not just the two or three that show up in most examples. A name Enola does not recognise stops the run and says so, rather than matching nothing: matching is exact, so `CYCLES` is not `cycles`, and a list mixing valid and invalid names is refused whole. The `verdict-file` output holds the policy that actually ran. Each row below is a real value you can paste into `with:`:
 
 | You want | Set |
 |---|---|
@@ -58,11 +58,11 @@ Two separate things decide that: what Enola **finds**, and what your inputs **fa
 | Fail on a layer order you declared being crossed the wrong way | `fail-on: layers` |
 | Also fail on an undeclared cross-repo seam, and on new cycles | `fail-on: layers,intent,cycles` |
 | Fail on a breach of an architecture rule you declared in `enola/constraints/` | `fail-on: constraints` |
-| Everything Enola proves, plus the fourteen it infers | `fail-on: layers,intent,cycles,constraints,crossrepo,coverage,unused-routes,god-class,hotspots,dependency-depth,exported-surface,complexity-outliers,domain,query-loops,entry-points,messaging-coverage,dead-methods,vendored-candidates` **and** `min-confidence: "0.8"` |
+| Everything Enola proves, plus every explainer it infers | `fail-on:` with every name from [docs/EXPLAINERS.md](https://github.com/enola-labs/enola/blob/main/docs/EXPLAINERS.md), comma separated, **and** `min-confidence: "0.8"` |
 | Enforce a policy, but only warn on this branch | `fail-on: layers` **and** `warn-only: "true"` |
 | Fail if the change spread outside the area you named | `target: internal/auth` **and** `max-spillover: "0"` |
 
-The fourth row needs both halves, which is the trap below in one line: the names alone would change nothing.
+The fifth row needs both halves, which is the trap below in one line: the names alone would change nothing.
 
 ### What lands on the pull request
 
@@ -99,7 +99,42 @@ The same finding also lands on `storage/storage.go` as a source annotation, so i
 Two traps worth knowing before you set `fail-on`:
 
 - **No `fail-on` means no gate.** A workflow that sets neither `fail-on` nor `max-spillover` cannot fail, whatever Enola finds. The action emits a job warning and a summary notice on every such run rather than letting a green check speak for itself, but a required status check configured on it is protecting nothing.
-- **Naming an explainer is not always enough, because the floor applies per finding.** Only four of the eighteen ever reach `1.00`: `cycles`, `intent`, `constraints` for a rule in enforcing mode, and `layers` when the layer order is *declared* in `enola-intent.yaml`. Everything else is inferred rather than proven and is capped at `0.95` by design, so it cannot fail at the default floor no matter what you put in `fail-on`. Naming any of the other fourteen is a no-op until you also lower `min-confidence`.
+- **Naming an explainer is not always enough, because the floor applies per finding.** Only four explainers ever reach `1.00`: `cycles`, `intent`, `constraints` for a rule in enforcing mode, and `layers` when the layer order is *declared* in `enola-intent.yaml`. Everything else is inferred rather than proven and is capped at `0.95` by design, so it cannot fail at the default floor no matter what you put in `fail-on`. Naming any other explainer is a no-op until you also lower `min-confidence`.
+
+## Policy as code
+
+Enola checks more than the architecture it infers. You can write down rules of your own, commit them next to the code they govern, and the action enforces them on every pull request. A rule names a set of code and what that code must never do. This one keeps personal data out of application logs:
+
+```yaml
+# enola/constraints/gdpr.yaml
+components:
+  - name: personal-data
+    match: ["customers/**"]
+
+rules:
+  - id: gdpr-art-5-1-f-personal-data-never-reaches-the-log
+    forbid: personal-data
+    to_name: ["log.*"]
+    via: calls
+    mode: strict
+    because: >-
+      GDPR Art. 5(1)(f): integrity and confidentiality. A subject's name in an
+      application log is personal data in a system with a different retention
+      period, a different access list and no erasure path, which turns one
+      logging call into a second copy nobody can delete.
+```
+
+Gate on it with one input:
+
+```yaml
+      - uses: enola-labs/enola-action@v2
+        with:
+          fail-on: constraints
+```
+
+A pull request that adds `log.Printf("erasing %s", subject)` to `customers/` compiles and passes `go vet`, and fails this job. The finding lands on `customers/store.go` as an error annotation carrying the rule's `because:` text, so the reviewer reads *why* the rule exists in the diff, not only that it broke.
+
+Rules go further than a direct call: they can forbid reaching code through any call path, require every file in a scope to be linked to a written policy, and carry exemptions with an owner, a reason and a date, which the summary's excuse-rate line then counts. [`examples/policy-as-code`](https://github.com/enola-labs/enola/tree/main/examples/policy-as-code) applies PCI DSS and GDPR rules to a small Go module end to end, and [docs/CONSTRAINTS.md](https://github.com/enola-labs/enola/blob/main/docs/CONSTRAINTS.md) is the full rule vocabulary. This repository holds itself to its own declared layer order in [`enola-intent.yaml`](enola-intent.yaml), enforced by its CI with `fail-on: layers`.
 
 ## Configuration
 
@@ -109,10 +144,7 @@ Every input is optional. The workflow above is the whole setup.
 - uses: enola-labs/enola-action@v2
   with:
     # Explainers whose new findings fail the job. WITHOUT THIS INPUT NOTHING FAILS.
-    # Any of: cycles, layers, intent, constraints, crossrepo, coverage, unused-routes,
-    # god-class, hotspots, dependency-depth, exported-surface, complexity-outliers,
-    # domain, query-loops, entry-points, messaging-coverage, dead-methods,
-    # vendored-candidates
+    # Any explainer name; docs/EXPLAINERS.md in the enola repository lists them all.
     fail-on: layers,intent,cycles
     # Confidence floor within those explainers. Default "1.00" — only cycles, intent,
     # constraints and declared-layer violations reach it, so lower this to enforce the rest.
@@ -123,7 +155,7 @@ Every input is optional. The workflow above is the whole setup.
     max-spillover: "0"
 ```
 
-That block sets four inputs at once to show what they look like together; each one is independently optional. There are [fourteen more](#every-input) - the base override, the annotation and summary switches, the working directory, and the version or binary to grade with.
+That block sets four inputs at once to show what they look like together; each one is independently optional. The [rest of the inputs](#every-input) cover the base override, the annotation and summary switches, the working directory, and the version or binary to grade with.
 
 **There is no config file to write.** Enola ships its own defaults - it detects the languages in your repository, ignores the usual build output, vendored dependencies and test trees, and runs every extractor and explainer it has. That is what the quickstart above does, with no `mcp-arch.yaml` anywhere.
 
@@ -133,7 +165,7 @@ The action requires the base commit to be available. `fetch-depth: 0` is recomme
 
 ### Every input
 
-Eighteen, all optional, defaults in the right-hand column.
+All optional, defaults in the right-hand column.
 
 | Input | Default | What it does |
 |---|---|---|
@@ -146,7 +178,7 @@ Eighteen, all optional, defaults in the right-hand column.
 | `focus` | - | narrow the reported delta to one module, file or symbol |
 | `detail` | `false` | put the complete structural delta in the job summary |
 | `config` | - | repository-relative `mcp-arch.yaml`, read on both sides of the comparison |
-| `version` | `latest` | Enola release to download, e.g. `"0.3.13"` |
+| `version` | `latest` | Enola release to download, e.g. `"0.4.23"` |
 | `binary` | - | grade with an executable the workflow built instead; wins over `version` |
 | `base-sha` | - | override the base commit the action resolved |
 | `annotations` | `true` | emit source annotations |
@@ -155,7 +187,7 @@ Eighteen, all optional, defaults in the right-hand column.
 | `working-directory` | `.` | repository-relative project directory |
 | `token` | `github.token` | used only to resolve the latest release version |
 
-And twelve outputs: `status`, `partial`, `regressions`, `advisories`, `facts-added`, `facts-removed`, `edges-added`, `edges-removed`, `ungraded-facts`, `ungraded-findings`, `sarif-file`, and `verdict-file` - the path to the complete JSON verdict, which carries more than the others summarise.
+And these outputs: `status`, `partial`, `regressions`, `advisories`, `facts-added`, `facts-removed`, `edges-added`, `edges-removed`, `ungraded-facts`, `ungraded-findings`, `sarif-file`, and `verdict-file` - the path to the complete JSON verdict, which carries more than the others summarise.
 
 `status` is `clean`, `regression`, `usage_error`, `incomparable`, or one of the two **partial** forms - see [when Enola grades only part of the graph](#when-enola-grades-only-part-of-the-graph).
 
@@ -194,7 +226,7 @@ The action treats a partial verdict as the real pass or fail it is, and never as
 
 A regression among an excluded producer's facts is **not** reported. That is what makes the verdict partial, and it is why the action says so everywhere it says anything.
 
-By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.3.13"`, for reproducible checks that don't change when a new Enola version ships.
+By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.4.23"`, for reproducible checks that don't change when a new Enola version ships.
 
 ## Grading with your own build
 
@@ -212,20 +244,21 @@ This is what a repository that develops Enola, or ships a wrapper around it, nee
 
 ## This action and enola
 
-The action is the CI face of [enola](https://github.com/enola-labs/enola), an Apache-2.0 engine that indexes a repository into a dependency graph and grades a change against a pinned baseline. Every finding reported here comes from `enola check`, so the verdict on a pull request is the verdict you get in your shell:
+The action is the CI face of [enola](https://github.com/enola-labs/enola), an Apache-2.0 engine that builds one graph of your software system, across repositories, languages and frameworks, and grades a change by comparing that graph before and after it. Every finding reported here comes from `enola check`, so the verdict on a pull request is the verdict you get in your shell:
 
 ```bash
-enola baseline pin      # freeze the architecture before you edit
+enola baseline pin                  # freeze the architecture before you edit
 enola check                         # report the structural delta; exit 0
 enola check --fail-on=layers        # exit 1 on a new declared-layer violation
 ```
 
 Same explainers, same exit codes. What the action adds is the pull-request wiring: it resolves the exact base commit, pins and grades both sides itself - no baseline artifact to publish and restore - turns new findings into source annotations, and writes the delta to the job summary. Failing findings annotate as errors, advisory ones and rules your change newly declared as warnings, on the line the extractor measured - capped at ten per level, with a notice saying how many were held back so a cap never reads as "that was all of them". Findings with no position are counted rather than pinned to a line nobody wrote. The `verdict-file` output always holds the complete verdict, every bucket included.
 
-- **[enola](https://github.com/enola-labs/enola)** - what it is, what fails a build, and the 20+ languages it parses
+- **[enola](https://github.com/enola-labs/enola)** - what it is, and the 23 languages and formats it reads
+- **[docs/GATING.md](https://github.com/enola-labs/enola/blob/main/docs/GATING.md)** - what a verdict contains and exactly what can fail a build
 - **[docs/CLI.md](https://github.com/enola-labs/enola/blob/main/docs/CLI.md)** - the flags behind the `fail-on`, `min-confidence`, `target` and `max-spillover` inputs
 - **[docs/EXPLAINERS.md](https://github.com/enola-labs/enola/blob/main/docs/EXPLAINERS.md)** - what each explainer computes, and which of them Enola proves rather than infers
-- **MCP** - the same graph inside your agent, before it edits rather than only after
+- **[With your coding agent](https://github.com/enola-labs/enola#with-your-coding-agent)** - the same graph inside your agent over MCP, before it edits rather than only after
 
 ## Security
 
