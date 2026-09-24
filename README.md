@@ -190,7 +190,7 @@ All optional, defaults in the right-hand column.
 | `focus` | - | narrow the reported delta to one module, file or symbol |
 | `detail` | `false` | put the complete structural delta in the job summary |
 | `config` | - | repository-relative `mcp-arch.yaml`, read on both sides of the comparison |
-| `version` | `latest` | Enola release to download, e.g. `"0.4.23"` |
+| `version` | `latest` | Enola release to download, e.g. `"0.4.24"` |
 | `binary` | - | grade with an executable the workflow built instead; wins over `version` |
 | `reviewers` | `false` | report who owns the modules this change touched and suggest a reviewer; never fails the job |
 | `reviewer-window` | `500` | with `reviewers`, how many recent commits authorship is measured over |
@@ -241,7 +241,7 @@ The action treats a partial verdict as the real pass or fail it is, and never as
 
 A regression among an excluded producer's facts is **not** reported. That is what makes the verdict partial, and it is why the action says so everywhere it says anything.
 
-By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.4.23"`, for reproducible checks that don't change when a new Enola version ships.
+By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.4.24"`, for reproducible checks that don't change when a new Enola version ships.
 
 ## Grading with your own build
 
