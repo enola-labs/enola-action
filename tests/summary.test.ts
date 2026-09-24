@@ -7,7 +7,7 @@ const { write, addRaw } = vi.hoisted(() => {
 });
 vi.mock("@actions/core", () => ({ summary: { addRaw } }));
 
-import { lawLine, writeSummary } from "../src/report/summary.js";
+import { guidanceMarkdown, lawLine, reviewersMarkdown, writeSummary } from "../src/report/summary.js";
 import { LedgerSummary, Verdict } from "../src/core/types.js";
 
 function verdict(overrides: Partial<Verdict>): Verdict {
@@ -325,5 +325,86 @@ describe("lawLine", () => {
     );
     const markdown = addRaw.mock.calls[0][0] as string;
     expect(markdown).toContain("_law: 1 rule · 1 breach · 1 excused (100%) · oldest excuse 5 days_");
+  });
+});
+
+describe("guidance", () => {
+  it("renders advice with its reason, exemplars and the files it matched", () => {
+    const markdown = guidanceMarkdown([
+      {
+        rule: "use-repo-layer",
+        component: "api",
+        message: "Go through the repository layer",
+        mode: "notify",
+        because: "handlers must not hold SQL",
+        exemplars: [{ exemplar: "api/users.go", presence: "present" }, { exemplar: "api/old.go", presence: "unmeasured" }],
+        matched_files: ["api/orders.go"],
+      },
+    ]);
+    expect(markdown).toContain("## Guidance for this change (1)");
+    expect(markdown).toContain("Steering, never graded");
+    expect(markdown).toContain("**use-repo-layer** `notify`: Go through the repository layer");
+    expect(markdown).toContain("because: handlers must not hold SQL");
+    expect(markdown).toContain("exemplar `api/old.go` (unmeasured, no snapshot)");
+    expect(markdown).toContain("changed: `api/orders.go`");
+  });
+
+  it("renders nothing when there is none", () => {
+    expect(guidanceMarkdown(undefined)).toBe("");
+  });
+
+  it("appears in the job summary without changing the headline", async () => {
+    await writeSummary(
+      verdict({ guidance: [{ rule: "r", component: "c", message: "m", mode: "advisory", because: "b", matched_files: [] }] }),
+      "base",
+      "head",
+      "1.2.3",
+    );
+    const markdown = addRaw.mock.calls[0][0] as string;
+    expect(markdown).toContain("No structural regression");
+    expect(markdown).toContain("## Guidance for this change (1)");
+  });
+});
+
+describe("reviewers", () => {
+  it("names the owner and suggests them where the author is a minor contributor", () => {
+    const markdown = reviewersMarkdown({
+      actor: "Bob",
+      window: 500,
+      routes: [
+        {
+          module: "internal/auth",
+          owner: "Ada",
+          owner_share: 0.725,
+          minor: 2,
+          total: 5,
+          commits: 40,
+          actor_share: 0.025,
+          actor_is_minor: true,
+          via_dependents: [{ dependent: "internal/api", share: 0.8 }],
+        },
+        { module: "internal/db", minor: 0, total: 4, commits: 12 },
+      ],
+    });
+    expect(markdown).toContain("## Reviewers for this change (2)");
+    expect(markdown).toContain("last 500 commits");
+    expect(markdown).toContain("`internal/auth`: owner **Ada** (72%), 2 minor contributor(s) of 5");
+    expect(markdown).toContain("Bob is a minor contributor here (2%)");
+    expect(markdown).toContain("Bob owns `internal/api` (80%), which imports `internal/auth`");
+    expect(markdown).toContain("suggested reviewer: **Ada**");
+    expect(markdown).toContain("`internal/db`: no single contributor above 50%");
+  });
+
+  it("says why when authorship could not be measured, rather than printing nothing", () => {
+    expect(reviewersMarkdown({ window: 500, cause: "no_git" })).toContain("Not measured: no readable git repository here.");
+  });
+
+  it("warns that a shallow clone shortened the window", () => {
+    const markdown = reviewersMarkdown({ window: 500, cause: "shallow", routes: [{ module: "m", minor: 0, total: 1, commits: 1 }] });
+    expect(markdown).toContain("fetch-depth: 0");
+  });
+
+  it("renders nothing when the run did not ask for reviewers", () => {
+    expect(reviewersMarkdown(undefined)).toBe("");
   });
 });

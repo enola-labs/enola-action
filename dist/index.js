@@ -34225,7 +34225,11 @@ async function run() {
         if (pin.exitCode !== 0)
             throw new Error(`Unable to create base snapshot: ${pin.stderr.trim() || pin.stdout.trim()}`);
         const baseline = node_path_1.default.join(baseDirectory, ".enola", "baseline");
-        const headInputs = { ...inputs, config: headConfig };
+        // Enola defaults the actor to `git config user.name`, which on a runner is unset or a
+        // bot. The name history records for the pull request's own head commit is the one
+        // the authorship shares are measured in.
+        const author = inputs.reviewers && !inputs.author ? await (0, git_js_1.commitAuthor)(headRoot, revisions.authorSha) : inputs.author;
+        const headInputs = { ...inputs, config: headConfig, author };
         const result = await (0, exec_js_1.capture)(installed.path, (0, inputs_js_1.checkArguments)(headInputs, baseline), headDirectory, true);
         let verdict;
         try {
@@ -34363,6 +34367,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ensureCommit = ensureCommit;
 exports.addWorktree = addWorktree;
 exports.removeWorktree = removeWorktree;
+exports.commitAuthor = commitAuthor;
 const exec_js_1 = __nccwpck_require__(6886);
 async function ensureCommit(repo, sha) {
     const present = await (0, exec_js_1.capture)("git", ["cat-file", "-e", `${sha}^{commit}`], repo, true);
@@ -34381,6 +34386,12 @@ async function addWorktree(repo, target, sha) {
 async function removeWorktree(repo, target) {
     await (0, exec_js_1.capture)("git", ["worktree", "remove", "--force", target], repo, true);
     await (0, exec_js_1.capture)("git", ["worktree", "prune"], repo, true);
+}
+// The author name git history records for a commit, or undefined when the commit is not
+// in the clone (a shallow checkout of the merge ref does not carry the PR head).
+async function commitAuthor(repo, sha) {
+    const result = await (0, exec_js_1.capture)("git", ["log", "-1", "--format=%an", sha], repo, true);
+    return result.exitCode === 0 ? result.stdout.trim() || undefined : undefined;
 }
 
 
@@ -34458,8 +34469,8 @@ async function sha256(file) {
     hash.update(await node_fs_1.promises.readFile(file));
     return hash.digest("hex");
 }
-// A locally built engine — the binary the pull request itself produces, or an enterprise
-// wrapper that is never published as an Enola release. It is graded through exactly the
+// A locally built engine — the binary the pull request itself produces, or any build that
+// is not published as an Enola release. It is graded through exactly the
 // same worktree/pin/check path as a downloaded release, so a repository that builds its
 // own engine no longer has to reimplement this workflow in shell.
 //
@@ -34475,8 +34486,8 @@ async function useLocalEnola(binary, workspace) {
     }
     // Report the version the way the download path does, so the job summary states which
     // engine produced the verdict rather than leaving "local" to stand for anything.
-    // --version writes to stderr in Enola and the enterprise wrapper does not implement
-    // --json, so both streams are searched and an unparsable banner is not fatal.
+    // --version writes to stderr in Enola, and a local build's banner is not guaranteed to
+    // match a release's, so both streams are searched and an unparsable banner is not fatal.
     const check = await (0, exec_js_1.capture)(resolved, ["--version"], workspace, true);
     if (check.exitCode !== 0)
         throw new Error(`The binary input could not start: ${check.stderr.trim() || check.stdout.trim()}`);
@@ -34540,7 +34551,7 @@ function resolveRevisionContext(inputs, eventName, payload, sha) {
     }
     if (!sha)
         throw new Error("GitHub did not provide a current commit SHA.");
-    return { baseSha, headSha: sha, eventName };
+    return { baseSha, headSha: sha, authorSha: payload.pull_request?.head?.sha || sha, eventName };
 }
 
 
@@ -34604,6 +34615,9 @@ function readInputs() {
         target: optional("target"),
         expected: optional("expected"),
         maxSpillover: optional("max-spillover"),
+        reviewers: core.getBooleanInput("reviewers"),
+        reviewerWindow: optional("reviewer-window"),
+        author: optional("author"),
         baseSha: optional("base-sha"),
         annotations: core.getBooleanInput("annotations"),
         sarif: core.getBooleanInput("sarif"),
@@ -34635,6 +34649,15 @@ function checkArguments(inputs, baseline) {
         args.push("--expected", inputs.expected);
     if (inputs.maxSpillover)
         args.push("--max-spillover", inputs.maxSpillover);
+    // Opt-in, like the engine's flag: without it no git author name is read at all. The
+    // window and author mean nothing without --reviewers, so they only ride along with it.
+    if (inputs.reviewers) {
+        args.push("--reviewers");
+        if (inputs.reviewerWindow)
+            args.push("--reviewer-window", inputs.reviewerWindow);
+        if (inputs.author)
+            args.push("--author", inputs.author);
+    }
     if (inputs.config)
         args.push(inputs.config);
     return args;
@@ -35246,6 +35269,8 @@ exports.lawLine = lawLine;
 exports.censusLine = censusLine;
 exports.intersectionLines = intersectionLines;
 exports.logVerdict = logVerdict;
+exports.guidanceMarkdown = guidanceMarkdown;
+exports.reviewersMarkdown = reviewersMarkdown;
 exports.writeSummary = writeSummary;
 const core = __importStar(__nccwpck_require__(7484));
 const verdict_js_1 = __nccwpck_require__(5187);
@@ -35256,6 +35281,13 @@ const findings_js_1 = __nccwpck_require__(9334);
 // and writes nothing at all.
 const LIST_LIMIT = 25;
 const DELTA_LIMIT = 50;
+// Ported from `pkg/check/render.go` (writeReviewers). Shares print as whole percentages,
+// the way the engine's own text verdict prints them.
+const OWNED_THRESHOLD = 50;
+const VIA_LIMIT = 3;
+function percent(share = 0) {
+    return `${roundHalfEven(share * 100)}%`;
+}
 function short(sha) {
     return sha.slice(0, 8);
 }
@@ -35276,9 +35308,9 @@ function findingList(findings) {
     }
     return shown.join("\n");
 }
-// Go's %.0f rounds half to even; JavaScript's Math.round rounds half up. The excuse
-// share is the only place this action formats a percentage, and one line that reads
-// differently here than in the step log would defeat the point of porting it at all.
+// Go's %.0f rounds half to even; JavaScript's Math.round rounds half up. The excuse and
+// authorship shares are ported from Enola's own text verdict, and a number that reads
+// differently here than in the step log would defeat the point of porting them at all.
 function roundHalfEven(value) {
     const floor = Math.floor(value);
     const rest = value - floor;
@@ -35427,6 +35459,11 @@ function logVerdict(verdict) {
         .map((bucket) => `${bucket.findings.length} ${bucket.name}`);
     if (others.length)
         core.info(`Also reported: ${others.join(", ")}`);
+    for (const match of verdict.guidance || [])
+        core.info(`  Guidance: ${match.rule} [${match.mode}] — ${match.message}`);
+    const suggested = (verdict.reviewers?.routes || []).filter((route) => route.actor_is_minor && route.owner && route.owner !== verdict.reviewers?.actor);
+    for (const route of suggested)
+        core.info(`  Suggested reviewer for ${route.module}: ${route.owner}`);
     for (const warning of verdict.comparability_warnings || [])
         core.warning(warning);
     // A partial verdict is a real pass or fail over PART of the graph. Warned, not merely
@@ -35449,6 +35486,80 @@ function logVerdict(verdict) {
             core.info(`  ${label}: ${(0, findings_js_1.ruleOf)(finding)} · ${finding.confidence.toFixed(2)} — ${finding.title}${place}`);
         }
     }
+}
+// Advice for files this change touched, from the repository's declared guidance rules.
+// Steering, never graded: it has its own section so it is never read as a finding.
+function guidanceMarkdown(guidance = []) {
+    if (!guidance.length)
+        return "";
+    let markdown = `## Guidance for this change (${guidance.length})\n\nAdvice for files this change touched. ` +
+        "Steering, never graded.\n\n";
+    for (const match of guidance.slice(0, LIST_LIMIT)) {
+        markdown += `- **${match.rule}** \`${match.mode}\`: ${match.message}\n  - because: ${match.because}\n`;
+        for (const exemplar of match.exemplars || []) {
+            const presence = exemplar.presence === "unmeasured" ? "unmeasured, no snapshot" : exemplar.presence;
+            markdown += `  - exemplar \`${exemplar.exemplar}\` (${presence})\n`;
+        }
+        const files = match.matched_files || [];
+        for (const file of files.slice(0, LIST_LIMIT))
+            markdown += `  - changed: \`${file}\`\n`;
+        if (files.length > LIST_LIMIT)
+            markdown += `  - …and ${files.length - LIST_LIMIT} more changed files in ${match.component}\n`;
+    }
+    if (guidance.length > LIST_LIMIT)
+        markdown += `- …and ${guidance.length - LIST_LIMIT} more, in the \`verdict-file\` output.\n`;
+    return `${markdown}\n`;
+}
+// A declined authorship read, as a sentence. A routing section that printed nothing would
+// be indistinguishable from a repository where everybody owns everything.
+function reviewerCause(cause) {
+    if (cause === "no_git")
+        return "no readable git repository here";
+    if (cause === "empty_window")
+        return "no commits in the window";
+    return "";
+}
+// Who owns what this change touched, and who to route it to. Summary and log only: an
+// annotation or a SARIF result reads as a problem on a line, and "ask the owner" is neither.
+function reviewersMarkdown(reviewers) {
+    if (!reviewers)
+        return "";
+    const cause = reviewerCause(reviewers.cause);
+    if (cause)
+        return `## Reviewers for this change\n\nNot measured: ${cause}.\n\n`;
+    const routes = reviewers.routes || [];
+    if (!routes.length)
+        return "";
+    let markdown = `## Reviewers for this change (${routes.length})\n\nAuthorship over the last ` +
+        `${(0, findings_js_1.plural)(reviewers.window, "commit", "commits")}. Steering, never graded.\n\n`;
+    if (reviewers.cause === "shallow") {
+        markdown += "> Shallow clone: the window closed early, so shares cover less history than asked for. " +
+            "Check out with `fetch-depth: 0` for the full window.\n\n";
+    }
+    if (reviewers.actor_unknown) {
+        markdown += `> \`${reviewers.actor}\` has no commits in the window, so only owners are reported.\n\n`;
+    }
+    for (const route of routes.slice(0, LIST_LIMIT)) {
+        const contributors = `${route.minor} minor contributor(s) of ${route.total}`;
+        markdown += route.owner
+            ? `- \`${route.module}\`: owner **${route.owner}** (${percent(route.owner_share)}), ${contributors}\n`
+            : `- \`${route.module}\`: no single contributor above ${OWNED_THRESHOLD}%, ${contributors}\n`;
+        if (!reviewers.actor || !route.actor_is_minor)
+            continue;
+        markdown += `  - ${reviewers.actor} is a minor contributor here (${percent(route.actor_share)})\n`;
+        const via = route.via_dependents || [];
+        for (const dependent of via.slice(0, VIA_LIMIT)) {
+            markdown += `  - ${reviewers.actor} owns \`${dependent.dependent}\` (${percent(dependent.share)}), ` +
+                `which imports \`${route.module}\`\n`;
+        }
+        if (via.length > VIA_LIMIT)
+            markdown += `  - …and ${via.length - VIA_LIMIT} more module(s) they own that import it\n`;
+        if (route.owner && route.owner !== reviewers.actor)
+            markdown += `  - suggested reviewer: **${route.owner}**\n`;
+    }
+    if (routes.length > LIST_LIMIT)
+        markdown += `- …and ${routes.length - LIST_LIMIT} more touched module(s)\n`;
+    return `${markdown}\n`;
 }
 function factLine(fact) {
     return `- \`${fact.kind}\` ${fact.name}${fact.file ? ` — \`${fact.file}${fact.line ? `:${fact.line}` : ""}\`` : ""}`;
@@ -35584,6 +35695,8 @@ async function writeSummary(verdict, baseSha, headSha, version, detail = false) 
             "report. Set `fail-on` (e.g. `fail-on: layers`) or `max-spillover` to make this a gate.\n\n";
     }
     markdown += findingSections(verdict);
+    markdown += guidanceMarkdown(verdict.guidance);
+    markdown += reviewersMarkdown(verdict.reviewers);
     if (verdict.comparability_warnings?.length) {
         markdown += `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
     }

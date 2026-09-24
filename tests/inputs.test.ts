@@ -39,3 +39,19 @@ describe("the flags the check run does NOT get", () => {
     expect(checkArguments(inputs, "/tmp/base")).toEqual(["check", "--baseline", "/tmp/base", "--json"]);
   });
 });
+
+describe("reviewers", () => {
+  const base = { warnOnly: false, detail: false, annotations: true, summary: true, version: "latest", workingDirectory: "." };
+
+  it("passes the window and author only alongside --reviewers", () => {
+    const inputs = { ...base, reviewers: true, reviewerWindow: "200", author: "Ada Lovelace" } as Inputs;
+    expect(checkArguments(inputs, "/tmp/base")).toEqual([
+      "check", "--baseline", "/tmp/base", "--json", "--reviewers", "--reviewer-window", "200", "--author", "Ada Lovelace",
+    ]);
+  });
+
+  it("reads no author name when reviewers is off", () => {
+    const inputs = { ...base, reviewers: false, reviewerWindow: "200", author: "Ada Lovelace" } as Inputs;
+    expect(checkArguments(inputs, "/tmp/base")).toEqual(["check", "--baseline", "/tmp/base", "--json"]);
+  });
+});

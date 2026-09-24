@@ -156,6 +156,42 @@ export interface IntersectionGrading {
   excluded: ExcludedProducer[];
 }
 
+// Advice a declared guidance rule attaches to files this change touched. Steering, never
+// graded: it cannot fail the job and does not count toward any number the job reports.
+export interface GuidanceMatch {
+  rule: string;
+  component: string;
+  message: string;
+  mode: string;
+  because: string;
+  source?: string;
+  exemplars?: { exemplar: string; presence: string }[];
+  matched_files: string[];
+}
+
+// Who owns the modules this change touched, from git authorship. Present only when the
+// run asked for it (--reviewers). Like guidance it never grades: it is derived from
+// history, not code, so it moves while the architecture stands still.
+export interface ReviewerRoute {
+  module: string;
+  owner?: string;
+  owner_share?: number;
+  minor: number;
+  total: number;
+  commits: number;
+  actor_share?: number;
+  actor_is_minor?: boolean;
+  via_dependents?: { dependent: string; share: number }[];
+}
+
+export interface Reviewers {
+  actor?: string;
+  actor_unknown?: boolean;
+  window: number;
+  cause?: string; // "no_git" | "shallow" | "empty_window"
+  routes?: ReviewerRoute[];
+}
+
 export interface Verdict {
   schema_version?: number;
   tool?: { name: string; version: string };
@@ -182,7 +218,8 @@ export interface Verdict {
   measurements?: Measurement[];
   breaches?: Breach[];
   intersection_grading?: IntersectionGrading | null;
-  guidance?: unknown[];
+  guidance?: GuidanceMatch[];
+  reviewers?: Reviewers | null;
   comparability_warnings?: string[];
   blocking_kinds?: string[];
   advisory_kinds?: string[];
@@ -235,6 +272,9 @@ export interface Inputs {
   target?: string;
   expected?: string;
   maxSpillover?: string;
+  reviewers: boolean;
+  reviewerWindow?: string;
+  author?: string;
   baseSha?: string;
   annotations: boolean;
   sarif: boolean;
@@ -246,11 +286,14 @@ export interface Inputs {
 export interface RevisionContext {
   baseSha: string;
   headSha: string;
+  // The commit whose author is "whose change this is" for --reviewers: the pull
+  // request's own head, not the merge commit GitHub checks out in its place.
+  authorSha: string;
   eventName: string;
 }
 
 export interface WebhookPayload {
-  pull_request?: { base?: { sha?: string } };
+  pull_request?: { base?: { sha?: string }; head?: { sha?: string } };
   before?: string;
   merge_group?: { base_sha?: string };
 }

@@ -5,7 +5,7 @@ import os from "node:os";
 import { annotate } from "./report/annotations.js";
 import { resolveRevisionContext } from "./policy/context.js";
 import { capture } from "./platform/exec.js";
-import { addWorktree, ensureCommit, removeWorktree } from "./platform/git.js";
+import { addWorktree, commitAuthor, ensureCommit, removeWorktree } from "./platform/git.js";
 import { checkArguments, readInputs } from "./policy/inputs.js";
 import { installEnola, useLocalEnola } from "./platform/install.js";
 import { logVerdict, writeSummary } from "./report/summary.js";
@@ -73,7 +73,11 @@ export async function run(): Promise<void> {
     const pin = await capture(installed.path, pinArgs, baseDirectory, true);
     if (pin.exitCode !== 0) throw new Error(`Unable to create base snapshot: ${pin.stderr.trim() || pin.stdout.trim()}`);
     const baseline = path.join(baseDirectory, ".enola", "baseline");
-    const headInputs = { ...inputs, config: headConfig };
+    // Enola defaults the actor to `git config user.name`, which on a runner is unset or a
+    // bot. The name history records for the pull request's own head commit is the one
+    // the authorship shares are measured in.
+    const author = inputs.reviewers && !inputs.author ? await commitAuthor(headRoot, revisions.authorSha) : inputs.author;
+    const headInputs = { ...inputs, config: headConfig, author };
     const result = await capture(installed.path, checkArguments(headInputs, baseline), headDirectory, true);
     let verdict;
     try {

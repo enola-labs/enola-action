@@ -25,5 +25,5 @@ export function resolveRevisionContext(
   }
   if (!sha) throw new Error("GitHub did not provide a current commit SHA.");
 
-  return { baseSha, headSha: sha, eventName };
+  return { baseSha, headSha: sha, authorSha: payload.pull_request?.head?.sha || sha, eventName };
 }

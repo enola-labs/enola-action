@@ -27,8 +27,8 @@ async function sha256(file: string): Promise<string> {
   return hash.digest("hex");
 }
 
-// A locally built engine — the binary the pull request itself produces, or an enterprise
-// wrapper that is never published as an Enola release. It is graded through exactly the
+// A locally built engine — the binary the pull request itself produces, or any build that
+// is not published as an Enola release. It is graded through exactly the
 // same worktree/pin/check path as a downloaded release, so a repository that builds its
 // own engine no longer has to reimplement this workflow in shell.
 //
@@ -44,8 +44,8 @@ export async function useLocalEnola(binary: string, workspace: string): Promise<
 
   // Report the version the way the download path does, so the job summary states which
   // engine produced the verdict rather than leaving "local" to stand for anything.
-  // --version writes to stderr in Enola and the enterprise wrapper does not implement
-  // --json, so both streams are searched and an unparsable banner is not fatal.
+  // --version writes to stderr in Enola, and a local build's banner is not guaranteed to
+  // match a release's, so both streams are searched and an unparsable banner is not fatal.
   const check = await capture(resolved, ["--version"], workspace, true);
   if (check.exitCode !== 0) throw new Error(`The binary input could not start: ${check.stderr.trim() || check.stdout.trim()}`);
   const banner = `${check.stdout} ${check.stderr}`.trim();

@@ -25,7 +25,12 @@ vi.mock("../src/policy/context.js", () => contextModule);
 const capture = vi.hoisted(() => vi.fn());
 vi.mock("../src/platform/exec.js", () => ({ capture }));
 
-const git = vi.hoisted(() => ({ ensureCommit: vi.fn(), addWorktree: vi.fn(), removeWorktree: vi.fn() }));
+const git = vi.hoisted(() => ({
+  ensureCommit: vi.fn(),
+  addWorktree: vi.fn(),
+  removeWorktree: vi.fn(),
+  commitAuthor: vi.fn(),
+}));
 vi.mock("../src/platform/git.js", () => git);
 
 const inputsModule = vi.hoisted(() => ({ readInputs: vi.fn(), checkArguments: vi.fn(() => ["check", "--json"]) }));
@@ -78,6 +83,7 @@ describe("run", () => {
     contextModule.resolveRevisionContext.mockReturnValue({
       baseSha: "basesha",
       headSha: "headsha",
+      authorSha: "prhead",
       eventName: "pull_request",
     });
     install.installEnola.mockResolvedValue({ path: "/bin/enola", version: "1.2.3" });
@@ -155,6 +161,28 @@ describe("run", () => {
     expect(install.installEnola).not.toHaveBeenCalled();
     expect(core.warning).not.toHaveBeenCalled();
     expect(capture).toHaveBeenCalledWith("/tmp/enola-ent", expect.arrayContaining(["baseline", "pin"]), expect.any(String), true);
+  });
+
+  it("passes the pull request head's author when reviewers is on", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ reviewers: true }));
+    git.commitAuthor.mockResolvedValue("Ada Lovelace");
+
+    await run();
+
+    expect(git.commitAuthor).toHaveBeenCalledWith("/workspace", "prhead");
+    expect(inputsModule.checkArguments).toHaveBeenCalledWith(expect.objectContaining({ author: "Ada Lovelace" }), expect.any(String));
+  });
+
+  it("reads no author when reviewers is off, and never overrides an explicit one", async () => {
+    await run();
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ reviewers: true, author: "Grace Hopper" }));
+    capture
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: JSON.stringify({ status: "clean" }), stderr: "" });
+    await run();
+
+    expect(git.commitAuthor).not.toHaveBeenCalled();
+    expect(inputsModule.checkArguments).toHaveBeenLastCalledWith(expect.objectContaining({ author: "Grace Hopper" }), expect.any(String));
   });
 
   it("warns that binary wins when an explicit version is also set", async () => {
