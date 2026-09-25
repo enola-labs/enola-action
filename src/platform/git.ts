@@ -19,3 +19,10 @@ export async function removeWorktree(repo: string, target: string): Promise<void
   await capture("git", ["worktree", "remove", "--force", target], repo, true);
   await capture("git", ["worktree", "prune"], repo, true);
 }
+
+// The author name git history records for a commit, or undefined when the commit is not
+// in the clone (a shallow checkout of the merge ref does not carry the PR head).
+export async function commitAuthor(repo: string, sha: string): Promise<string | undefined> {
+  const result = await capture("git", ["log", "-1", "--format=%an", sha], repo, true);
+  return result.exitCode === 0 ? result.stdout.trim() || undefined : undefined;
+}

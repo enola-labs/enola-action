@@ -43,6 +43,20 @@ inputs:
   max-spillover:
     description: Fail when spillover exceeds this count
     required: false
+  reviewers:
+    description: >-
+      Report who owns the modules this change touched, and suggest a reviewer where the
+      author is a minor contributor. Reads git author names; never fails the job. Needs
+      history, so check out with fetch-depth 0.
+    default: "false"
+  reviewer-window:
+    description: With reviewers, how many recent commits authorship is measured over (Enola default 500)
+    required: false
+  author:
+    description: >-
+      With reviewers, whose change this is, as git history spells the name. Defaults to
+      the author of the pull request's head commit.
+    required: false
   base-sha:
     description: Explicit base commit override
     required: false

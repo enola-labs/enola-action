@@ -18,6 +18,9 @@ export function readInputs(): Inputs {
     target: optional("target"),
     expected: optional("expected"),
     maxSpillover: optional("max-spillover"),
+    reviewers: core.getBooleanInput("reviewers"),
+    reviewerWindow: optional("reviewer-window"),
+    author: optional("author"),
     baseSha: optional("base-sha"),
     annotations: core.getBooleanInput("annotations"),
     sarif: core.getBooleanInput("sarif"),
@@ -43,6 +46,13 @@ export function checkArguments(inputs: Inputs, baseline: string): string[] {
   if (inputs.target) args.push("--target", inputs.target);
   if (inputs.expected) args.push("--expected", inputs.expected);
   if (inputs.maxSpillover) args.push("--max-spillover", inputs.maxSpillover);
+  // Opt-in, like the engine's flag: without it no git author name is read at all. The
+  // window and author mean nothing without --reviewers, so they only ride along with it.
+  if (inputs.reviewers) {
+    args.push("--reviewers");
+    if (inputs.reviewerWindow) args.push("--reviewer-window", inputs.reviewerWindow);
+    if (inputs.author) args.push("--author", inputs.author);
+  }
   if (inputs.config) args.push(inputs.config);
   return args;
 }
