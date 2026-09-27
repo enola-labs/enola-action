@@ -64,7 +64,7 @@ A failing run looks like this. The job summary, verbatim:
 >
 > | Base       | Current    | Enola    |
 > | ---------- | ---------- | -------- |
-> | `9f2c1ab4` | `3b7e5c2a` | `0.4.24` |
+> | `9f2c1ab4` | `3b7e5c2a` | `0.4.25` |
 >
 > _could not see: 0 files and 1 directory excluded by ignore globs; 2 imports targets outside the graph_
 >
@@ -142,7 +142,7 @@ All optional.
 | `focus`             | -                     | narrow the reported delta to one module, file or symbol                                     |
 | `detail`            | `false`               | put the complete structural delta in the job summary                                        |
 | `config`            | -                     | repository-relative `mcp-arch.yaml`, read on both sides of the comparison                   |
-| `version`           | `latest`              | Enola release to download, e.g. `"0.4.24"`                                                  |
+| `version`           | `latest`              | Enola release to download, e.g. `"0.4.25"`                                                  |
 | `binary`            | -                     | grade with an executable the workflow built instead; wins over `version`                    |
 | `reviewers`         | `false`               | report who owns the modules this change touched and suggest a reviewer; never fails the job |
 | `reviewer-window`   | `500`                 | with `reviewers`, how many recent commits authorship is measured over                       |

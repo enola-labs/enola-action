@@ -24,7 +24,7 @@ Set `sarif: "true"` to get a SARIF 2.1.0 file alongside the verdict, rendered fr
 
 ## Pinning an Enola release
 
-By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.4.24"`, for reproducible checks that don't change when a new Enola version ships.
+By default the action downloads the latest Enola release. Pin a specific release instead by setting `version` to a tag from the [Enola releases page](https://github.com/enola-labs/enola/releases), e.g. `version: "0.4.25"`, for reproducible checks that don't change when a new Enola version ships.
 
 ## Grading with your own build
 
