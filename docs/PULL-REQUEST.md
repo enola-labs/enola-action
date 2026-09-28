@@ -58,6 +58,27 @@ Two more sections appear only when there is something to put in them, and neithe
 
 `reviewer-window` sets how many recent commits authorship is measured over (default `500`), and `author` overrides whose change this is, as git history spells the name (default: the pull request's head commit author).
 
+### Package metrics
+
+When the change moved a package's [Martin metrics](https://github.com/enola-labs/enola/blob/main/docs/EXPLAINERS.md), the summary lists them before and after:
+
+```
+## Package metrics
+
+avg D 0.31 → 0.44 · avg I 0.62 → 0.50 · off main sequence 0 · 1 worse, 1 better. Reported, never graded.
+
+| Package | Ca | Ce | I | A | D | Zone |
+|---|---:|---:|---:|---:|---:|---|
+| `store` | 0 → 2 | 1 | 1.00 → 0.33 | 0.00 | 0.00 → 0.67 | main-sequence → neutral |
+| `api` | 1 | 1 → 2 | 0.50 → 0.67 | 0.00 | 0.50 → 0.33 | neutral |
+
+2 more packages moved without a change in D or zone. Set `detail: true` to list them.
+```
+
+The line above the table covers every package; the table lists the ones whose distance (D) or zone moved, plus packages added or removed. `detail: "true"` lists every package that moved. A zone marked `¹` flipped with the package's own numbers unchanged: the zone of pain is relative to the rest of the repository, and the rest moved.
+
+The section never fails the job. A package newly entering the zone of pain or uselessness is also reported as a `package-metrics` finding, and that finding fails the job under `fail-on: package-metrics`. The section needs an Enola that reports package metrics in its verdict; with an older one it is simply absent.
+
 Set `detail: "true"` to put the complete structural delta in the summary, and `focus` to narrow the reported delta to one module, file or symbol.
 
 ## Source annotations

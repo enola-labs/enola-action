@@ -192,6 +192,49 @@ export interface Reviewers {
   routes?: ReviewerRoute[];
 }
 
+// One package's Martin metrics on one side of the change.
+export interface PackageMetric {
+  package: string;
+  repo?: string;
+  classes_interfaces: number;
+  afferent_couplings: number;
+  efferent_couplings: number;
+  instability: number;
+  abstractness: number;
+  distance: number;
+  data_holder_ratio?: number;
+}
+
+export interface PackageMetricsAggregate {
+  analyzed: number;
+  avg_instability: number;
+  avg_distance: number;
+  off_main_sequence: number;
+}
+
+// A package whose metrics moved. `before` is absent for a package the change added,
+// `after` for one it removed. A zone flip with the package's own numbers unchanged is
+// incidental: the population's rigid floor moved, not this package.
+export interface PackageMetricRow {
+  package: string;
+  repo?: string;
+  before?: PackageMetric;
+  after?: PackageMetric;
+  zone_before?: string;
+  zone_after?: string;
+  zone_incidental?: boolean;
+}
+
+// What the change did to the package metrics. Reported by Enola, never graded; absent
+// from a verdict an older Enola produced, or one that graded nothing.
+export interface PackageMetricsDelta {
+  before: PackageMetricsAggregate;
+  after: PackageMetricsAggregate;
+  worsened: number;
+  improved: number;
+  packages?: PackageMetricRow[];
+}
+
 export interface Verdict {
   schema_version?: number;
   tool?: { name: string; version: string };
@@ -220,6 +263,7 @@ export interface Verdict {
   intersection_grading?: IntersectionGrading | null;
   guidance?: GuidanceMatch[];
   reviewers?: Reviewers | null;
+  package_metrics?: PackageMetricsDelta | null;
   comparability_warnings?: string[];
   blocking_kinds?: string[];
   advisory_kinds?: string[];
