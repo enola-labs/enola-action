@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkArguments } from "../src/policy/inputs.js";
+import { checkArguments, commentWhen } from "../src/policy/inputs.js";
 import { Inputs } from "../src/core/types.js";
 
 describe("checkArguments", () => {
@@ -53,5 +53,16 @@ describe("reviewers", () => {
   it("reads no author name when reviewers is off", () => {
     const inputs = { ...base, reviewers: false, reviewerWindow: "200", author: "Ada Lovelace" } as Inputs;
     expect(checkArguments(inputs, "/tmp/base")).toEqual(["check", "--baseline", "/tmp/base", "--json"]);
+  });
+});
+
+describe("pr-comment-when", () => {
+  it("defaults to auto and accepts the documented values", () => {
+    expect(commentWhen("")).toBe("auto");
+    for (const value of ["auto", "always", "findings", "failure"]) expect(commentWhen(value)).toBe(value);
+  });
+
+  it("rejects anything else instead of guessing", () => {
+    expect(() => commentWhen("sometimes")).toThrow("pr-comment-when must be one of auto, always, findings, failure");
   });
 });

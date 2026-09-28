@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import { Inputs } from "../core/types.js";
+import { COMMENT_WHEN, CommentWhen, Inputs } from "../core/types.js";
 
 function optional(name: string): string | undefined {
   return core.getInput(name).trim() || undefined;
@@ -25,9 +25,20 @@ export function readInputs(): Inputs {
     annotations: core.getBooleanInput("annotations"),
     sarif: core.getBooleanInput("sarif"),
     summary: core.getBooleanInput("summary"),
+    prComment: core.getBooleanInput("pr-comment"),
+    prCommentWhen: commentWhen(core.getInput("pr-comment-when")),
+    prCommentKey: optional("pr-comment-key"),
     workingDirectory: core.getInput("working-directory").trim() || ".",
     token: optional("token"),
   };
+}
+
+export function commentWhen(raw: string): CommentWhen {
+  const value = raw.trim() || "auto";
+  if (!(COMMENT_WHEN as readonly string[]).includes(value)) {
+    throw new Error(`pr-comment-when must be one of ${COMMENT_WHEN.join(", ")}; got "${value}".`);
+  }
+  return value as CommentWhen;
 }
 
 // The `enola check` invocation. One run, one format: the JSON verdict, which is what the

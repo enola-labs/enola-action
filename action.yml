@@ -71,11 +71,31 @@ inputs:
   summary:
     description: Write the GitHub job summary
     default: "true"
+  pr-comment:
+    description: >-
+      Also post the report as a pull request comment, edited in place on every push. Needs
+      `pull-requests: write`. A comment that cannot be posted is a warning and never changes
+      the job's outcome; pull requests from forks get a read-only token and no comment.
+    default: "false"
+  pr-comment-when:
+    description: >-
+      With pr-comment, when to post: auto (always while nothing is enforced, otherwise only
+      when the job fails), always, findings (anything reported), or failure. A failed job is
+      always commented on. An existing comment the current run does not earn is replaced by
+      a one-line passing note, so it never goes stale.
+    default: auto
+  pr-comment-key:
+    description: >-
+      With pr-comment, what identifies this step's comment. Defaults to working-directory, so
+      several steps in one workflow each keep their own. Set it when two steps share one.
+    required: false
   working-directory:
     description: Repository-relative project directory
     default: "."
   token:
-    description: GitHub token used only to resolve the latest Enola release version
+    description: >-
+      GitHub token used to resolve the latest Enola release version and, with pr-comment, to
+      post the comment
     default: ${{ github.token }}
 
 outputs:
@@ -109,6 +129,8 @@ outputs:
     description: Path to the complete JSON verdict
   sarif-file:
     description: Path to the SARIF file, when the sarif input is set
+  comment-url:
+    description: URL of the pull request comment, when pr-comment created or updated one
 
 runs:
   using: node24

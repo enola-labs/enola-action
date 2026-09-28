@@ -40,7 +40,14 @@ const install = vi.hoisted(() => ({ installEnola: vi.fn(), useLocalEnola: vi.fn(
 vi.mock("../src/platform/install.js", () => install);
 
 const summaryModule = vi.hoisted(() => ({ writeSummary: vi.fn(), logVerdict: vi.fn() }));
-vi.mock("../src/report/summary.js", () => summaryModule);
+// The renderers the comment reuses stay real; only the two writers are stubbed.
+vi.mock("../src/report/summary.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/report/summary.js")>()),
+  ...summaryModule,
+}));
+
+const github = vi.hoisted(() => ({ upsertComment: vi.fn() }));
+vi.mock("../src/platform/github.js", () => github);
 
 const verdictModule = vi.hoisted(() => ({ parseVerdict: vi.fn(), assertExitCode: vi.fn(), saveVerdict: vi.fn() }));
 // Only the three that touch the outside world are stubbed. regressionCount and
@@ -69,7 +76,10 @@ function defaultInputs(overrides: Partial<Inputs> = {}): Inputs {
     detail: false,
     annotations: true,
     summary: true,
+    prComment: false,
+    prCommentWhen: "auto",
     workingDirectory: ".",
+    token: "t",
     ...overrides,
   } as Inputs;
 }
@@ -393,5 +403,85 @@ describe("the sarif input", () => {
     await run();
     expect(fsMock.writeFile).not.toHaveBeenCalled();
     expect(core.setOutput).not.toHaveBeenCalledWith("sarif-file", expect.anything());
+  });
+});
+
+describe("pr-comment", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.assign(process.env, baseEnv, { GITHUB_REPOSITORY: "o/r", GITHUB_RUN_ID: "7" });
+    fsMock.readFile.mockResolvedValue(JSON.stringify({ pull_request: { number: 42 } }));
+    fsMock.mkdtemp.mockResolvedValue("/tmp/enola-action-xyz");
+    contextModule.resolveRevisionContext.mockReturnValue({
+      baseSha: "basesha", headSha: "headsha", authorSha: "prhead", eventName: "pull_request",
+    });
+    install.installEnola.mockResolvedValue({ path: "/bin/enola", version: "1.2.3" });
+    capture
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ exitCode: 1, stdout: "{}", stderr: "" });
+    verdictModule.parseVerdict.mockReturnValue({
+      status: "regression",
+      policy: { fail_explainers: ["layers"], thresholds: [] },
+      failures: [{ title: "Layer violation", source: "layers", confidence: 1 }],
+      edges_added: 0, edges_removed: 0, facts_added: 0, facts_removed: 0,
+    });
+  });
+
+  afterEach(() => {
+    for (const key of [...Object.keys(baseEnv), "GITHUB_REPOSITORY", "GITHUB_RUN_ID"]) delete process.env[key];
+  });
+
+  it("is off by default", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs());
+    await run();
+    expect(github.upsertComment).not.toHaveBeenCalled();
+  });
+
+  it("posts the report on the pull request and exposes its URL", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ prComment: true }));
+    github.upsertComment.mockResolvedValue({ action: "created", url: "https://github.com/o/r/pull/42#c1" });
+    await run();
+    const [target, marker, body, create] = github.upsertComment.mock.calls[0];
+    expect(target).toMatchObject({ repository: "o/r", issueNumber: 42, token: "t" });
+    expect(marker).toBe("<!-- enola-action:. -->");
+    expect(body).toContain("1 structural regression(s) introduced");
+    expect(body).toContain("https://github.com/o/r/actions/runs/7");
+    expect(create).toBe(true);
+    expect(core.setOutput).toHaveBeenCalledWith("comment-url", "https://github.com/o/r/pull/42#c1");
+  });
+
+  // A pull request from a fork gets a read-only token. The comment is a convenience; the
+  // job must pass or fail on the verdict exactly as it would have without it.
+  it("warns and leaves the outcome alone when the comment cannot be posted", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ prComment: true }));
+    github.upsertComment.mockRejectedValue(new Error("HTTP 403"));
+    await run();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("pr-comment: HTTP 403"));
+    expect(core.setFailed).toHaveBeenCalledWith("1 architectural regression(s) introduced.");
+  });
+
+  it("only edits an existing comment, with a passing note, when the run did not earn one", async () => {
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ prComment: true }));
+    capture.mockReset();
+    capture
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "{}", stderr: "" });
+    verdictModule.parseVerdict.mockReturnValue({
+      status: "clean", policy: { fail_explainers: ["layers"], thresholds: [] },
+      edges_added: 0, edges_removed: 0, facts_added: 0, facts_removed: 0,
+    });
+    github.upsertComment.mockResolvedValue({ action: "skipped" });
+    await run();
+    const [, , body, create] = github.upsertComment.mock.calls[0];
+    expect(create).toBe(false);
+    expect(body).toContain("passing");
+  });
+
+  it("skips events that are not pull requests", async () => {
+    fsMock.readFile.mockResolvedValue(JSON.stringify({ before: "basesha" }));
+    inputsModule.readInputs.mockReturnValue(defaultInputs({ prComment: true }));
+    await run();
+    expect(github.upsertComment).not.toHaveBeenCalled();
+    expect(core.info).toHaveBeenCalledWith(expect.stringContaining("not a pull request event"));
   });
 });

@@ -41,6 +41,12 @@ jobs:
   architecture:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # Job-level permissions replace the workflow's, so contents: read is restated.
+    # pull-requests: write is for the comment only; a fork's pull request still gets a
+    # read-only token, and the action then warns instead of commenting.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,3 +67,7 @@ jobs:
           # The policy. Without it this job is a report that can never fail — which is
           # the default enola ships, and the reason it is stated here rather than assumed.
           fail-on: layers
+          # Every pull request here gets the report as a comment, passing or not, so the
+          # comment itself is exercised on the action's own changes.
+          pr-comment: true
+          pr-comment-when: always

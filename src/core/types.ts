@@ -260,6 +260,10 @@ export interface Edge {
   repo?: string;
 }
 
+// When the pull request comment is created or updated. See shouldComment.
+export const COMMENT_WHEN = ["auto", "always", "findings", "failure"] as const;
+export type CommentWhen = (typeof COMMENT_WHEN)[number];
+
 export interface Inputs {
   version: string;
   binary?: string;
@@ -279,6 +283,9 @@ export interface Inputs {
   annotations: boolean;
   sarif: boolean;
   summary: boolean;
+  prComment: boolean;
+  prCommentWhen: CommentWhen;
+  prCommentKey?: string;
   workingDirectory: string;
   token?: string;
 }
@@ -293,7 +300,7 @@ export interface RevisionContext {
 }
 
 export interface WebhookPayload {
-  pull_request?: { base?: { sha?: string }; head?: { sha?: string } };
+  pull_request?: { number?: number; base?: { sha?: string }; head?: { sha?: string } };
   before?: string;
   merge_group?: { base_sha?: string };
 }

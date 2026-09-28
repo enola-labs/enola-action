@@ -10,7 +10,9 @@ import { checkArguments, readInputs } from "./policy/inputs.js";
 import { installEnola, useLocalEnola } from "./platform/install.js";
 import { logVerdict, writeSummary } from "./report/summary.js";
 import { toSarif } from "./report/sarif.js";
-import { Verdict, WebhookPayload } from "./core/types.js";
+import { commentMarker, renderComment, renderResolvedComment, shouldComment } from "./report/comment.js";
+import { upsertComment } from "./platform/github.js";
+import { Inputs, RevisionContext, Verdict, WebhookPayload } from "./core/types.js";
 import {
   assertExitCode,
   isKnownStatus,
@@ -117,12 +119,64 @@ export async function run(): Promise<void> {
     if (inputs.summary) {
       await writeSummary(verdict, revisions.baseSha, revisions.headSha, installed.version, inputs.detail);
     }
+    if (inputs.prComment) {
+      await commentOnPullRequest(inputs, verdict, result.exitCode, payload, revisions, installed.version);
+    }
 
     if (jobFailed(verdict, result.exitCode)) {
       core.setFailed(failureMessage(verdict, result.exitCode));
     }
   } finally {
     await removeWorktree(headRoot, baseRoot);
+  }
+}
+
+// The pull request comment. Never allowed to change the job's outcome: a token that
+// cannot write (every pull request from a fork gets a read-only one) is a warning, and
+// the job passes or fails on the verdict exactly as it would without the comment.
+async function commentOnPullRequest(
+  inputs: Inputs,
+  verdict: Verdict,
+  exitCode: number,
+  payload: WebhookPayload,
+  revisions: RevisionContext,
+  version: string,
+): Promise<void> {
+  const issueNumber = payload.pull_request?.number;
+  if (!issueNumber) {
+    core.info(`pr-comment: not a pull request event (${revisions.eventName || "unknown"}), so no comment.`);
+    return;
+  }
+  const repository = process.env.GITHUB_REPOSITORY;
+  if (!repository || !inputs.token) {
+    core.warning("pr-comment: GITHUB_REPOSITORY or the token is missing, so no comment was posted.");
+    return;
+  }
+  const server = process.env.GITHUB_SERVER_URL || "https://github.com";
+  const runId = process.env.GITHUB_RUN_ID;
+  const ctx = {
+    marker: commentMarker(inputs.prCommentKey || inputs.workingDirectory),
+    baseSha: revisions.baseSha,
+    headSha: revisions.headSha,
+    version,
+    runUrl: runId ? `${server}/${repository}/actions/runs/${runId}` : undefined,
+  };
+  const earned = shouldComment(inputs.prCommentWhen, verdict, exitCode);
+  try {
+    const result = await upsertComment(
+      { apiUrl: process.env.GITHUB_API_URL || "https://api.github.com", token: inputs.token, repository, issueNumber },
+      ctx.marker,
+      earned ? renderComment(verdict, ctx) : renderResolvedComment(ctx),
+      earned,
+    );
+    if (result.url) core.setOutput("comment-url", result.url);
+    core.info(
+      result.action === "skipped"
+        ? `pr-comment: nothing to report under pr-comment-when: ${inputs.prCommentWhen}.`
+        : `pr-comment: ${result.action} ${result.url}`,
+    );
+  } catch (error) {
+    core.warning(`pr-comment: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
