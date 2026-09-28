@@ -26,7 +26,7 @@ function percent(share = 0): string {
   return `${roundHalfEven(share * 100)}%`;
 }
 
-function short(sha: string): string {
+export function short(sha: string): string {
   return sha.slice(0, 8);
 }
 
@@ -319,7 +319,7 @@ function deltaSection<T>(title: string, entries: T[], line: (entry: T) => string
 // the summary say something untrue: a warn-only run that reported regressions is not "no
 // structural regression", a run with no policy did not look and find nothing, and a
 // partial verdict is not a verdict over the whole graph.
-function headlineOf(verdict: Verdict): { icon: string; title: string } {
+export function headlineOf(verdict: Verdict): { icon: string; title: string } {
   // Counts breaches, not just findings: a spillover-only failure has no failing finding,
   // and "0 structural regression(s) introduced" over a red job is worse than no summary.
   const regressions = regressionCount(verdict);
@@ -346,6 +346,12 @@ function headlineOf(verdict: Verdict): { icon: string; title: string } {
 // failed, why the job is red, what was merely reported, and then the four kinds of
 // finding Enola deliberately refuses to fold into any of those.
 function findingSections(verdict: Verdict): string {
+  return gradedSections(verdict) + otherFindingSections(verdict);
+}
+
+// What failed, why the job is red, and what was reported against the policy. The pull
+// request comment shows these in full and folds everything after them away.
+export function gradedSections(verdict: Verdict): string {
   const unenforced = enforcesNothing(verdict);
   const advisories = verdict.advisories || [];
   const breaches = verdict.breaches || [];
@@ -358,6 +364,12 @@ function findingSections(verdict: Verdict): string {
   if (advisories.length) {
     markdown += `## ${unenforced ? "Findings (reported, not enforced)" : "Advisory findings"}\n\n${findingList(advisories)}\n\n`;
   }
+  return markdown;
+}
+
+// The buckets Enola keeps out of both failures and advisories.
+export function otherFindingSections(verdict: Verdict): string {
+  let markdown = "";
   // A rule that arrived with this change, over code the change did not touch. Its own
   // section because folding it into advisories would report "this change introduced
   // 3,980 findings" about a pull request that introduced one declaration.
@@ -393,7 +405,7 @@ function findingSections(verdict: Verdict): string {
 // The delta table, and the complete delta under it on request. Enola's own --detail
 // prints that under the text verdict; the JSON the action reads carries the same delta,
 // so the input renders it here rather than asking the engine for a second run.
-function deltaMarkdown(verdict: Verdict, detail: boolean): string {
+export function deltaMarkdown(verdict: Verdict, detail: boolean): string {
   const findings = (verdict.failures || []).length + (verdict.advisories || []).length;
   let markdown = `## Architectural change\n\n| | Added | Removed |\n|---|---:|---:|\n`;
   markdown += `| Facts | ${verdict.facts_added} | ${verdict.facts_removed} |\n`;
@@ -413,13 +425,10 @@ function deltaMarkdown(verdict: Verdict, detail: boolean): string {
   return markdown;
 }
 
-export async function writeSummary(
-  verdict: Verdict,
-  baseSha: string,
-  headSha: string,
-  version: string,
-  detail = false,
-): Promise<void> {
+// The headline, the revisions, and the notes that qualify everything under them. Shared
+// by the job summary and the pull request comment, so the two never disagree about what
+// the run was.
+export function headerMarkdown(verdict: Verdict, baseSha: string, headSha: string, version: string): string {
   const { icon, title } = headlineOf(verdict);
   let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
   markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
@@ -433,12 +442,30 @@ export async function writeSummary(
     markdown += "> **No policy set.** Nothing in this run could fail the job — every finding below is a " +
       "report. Set `fail-on` (e.g. `fail-on: layers`) or `max-spillover` to make this a gate.\n\n";
   }
+  return markdown;
+}
+
+export function comparabilityMarkdown(verdict: Verdict): string {
+  if (!verdict.comparability_warnings?.length) return "";
+  return `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
+}
+
+export function renderSummary(verdict: Verdict, baseSha: string, headSha: string, version: string, detail = false): string {
+  let markdown = headerMarkdown(verdict, baseSha, headSha, version);
   markdown += findingSections(verdict);
   markdown += guidanceMarkdown(verdict.guidance);
   markdown += reviewersMarkdown(verdict.reviewers);
-  if (verdict.comparability_warnings?.length) {
-    markdown += `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
-  }
+  markdown += comparabilityMarkdown(verdict);
   markdown += deltaMarkdown(verdict, detail);
-  await core.summary.addRaw(markdown).write();
+  return markdown;
+}
+
+export async function writeSummary(
+  verdict: Verdict,
+  baseSha: string,
+  headSha: string,
+  version: string,
+  detail = false,
+): Promise<void> {
+  await core.summary.addRaw(renderSummary(verdict, baseSha, headSha, version, detail)).write();
 }

@@ -151,14 +151,42 @@ All optional.
 | `annotations`       | `true`                | emit source annotations                                                                     |
 | `sarif`             | `false`               | also write the findings as SARIF 2.1.0, for upload to code scanning                         |
 | `summary`           | `true`                | write the job summary                                                                       |
+| `pr-comment`        | `false`               | also post the report as a pull request comment, edited in place on every push               |
+| `pr-comment-when`   | `auto`                | with `pr-comment`: `auto`, `always`, `findings` or `failure`; see below                     |
+| `pr-comment-key`    | `working-directory`   | with `pr-comment`: what identifies this step's comment when several steps post one          |
 | `working-directory` | `.`                   | repository-relative project directory                                                       |
-| `token`             | `github.token`        | used only to resolve the latest release version                                             |
+| `token`             | `github.token`        | resolves the latest release version, and posts the comment with `pr-comment`                |
+
+## Pull request comment
+
+Set `pr-comment: true` to also get the report as a comment on the pull request. It needs one more permission:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
+
+The action keeps one comment per pull request and edits it on every push instead of adding a new one. The comment shows the headline, what failed and what was reported; everything else is folded, and it links to the workflow run for the full report.
+
+`pr-comment-when` decides when the comment is created or updated:
+
+| Value      | Comments when                                                              |
+| ---------- | -------------------------------------------------------------------------- |
+| `auto`     | every run while no policy is set, and only failures once one is            |
+| `always`   | every run                                                                  |
+| `findings` | anything was reported: regressions, findings or measurements over a bound  |
+| `failure`  | the job fails                                                              |
+
+`auto` suits both stages: while you are trying Enola out with no `fail-on`, every pull request gets the report; once you set a policy, only failing ones do. A failed job is commented on in every mode. When a later push no longer earns a comment, the existing one is replaced by a single line saying the check passes, so it never goes stale.
+
+A comment that cannot be posted is a warning, never a failure: the job passes or fails on the verdict alone. Pull requests from forks get a read-only token, so they get no comment; the job summary and annotations are unaffected.
 
 Outputs, SARIF upload, release pinning, grading with your own build and `mcp-arch.yaml` are in [docs/ADVANCED.md](docs/ADVANCED.md). When a pull request changes which extractors produce facts, Enola grades only the part both sides share and says so: [docs/PARTIAL-VERDICTS.md](docs/PARTIAL-VERDICTS.md).
 
 ## Security
 
-The action requires only `contents: read`, does not execute repository scripts, verifies the checksum of the downloaded Enola release, and stores its temporary base worktree under `RUNNER_TEMP`. Avoid `pull_request_target`; ordinary `pull_request` events work for forks without a write token.
+The action requires only `contents: read` (plus `pull-requests: write` with `pr-comment`), does not execute repository scripts, verifies the checksum of the downloaded Enola release, and stores its temporary base worktree under `RUNNER_TEMP`. Avoid `pull_request_target`; ordinary `pull_request` events work for forks without a write token.
 
 ## Found it useful?
 

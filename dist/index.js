@@ -34119,6 +34119,19 @@ module.exports = {
 
 /***/ }),
 
+/***/ 3054:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.COMMENT_WHEN = void 0;
+// When the pull request comment is created or updated. See shouldComment.
+exports.COMMENT_WHEN = ["auto", "always", "findings", "failure"];
+
+
+/***/ }),
+
 /***/ 1730:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -34174,6 +34187,8 @@ const inputs_js_1 = __nccwpck_require__(5725);
 const install_js_1 = __nccwpck_require__(5371);
 const summary_js_1 = __nccwpck_require__(7994);
 const sarif_js_1 = __nccwpck_require__(5881);
+const comment_js_1 = __nccwpck_require__(4231);
+const github_js_1 = __nccwpck_require__(5952);
 const verdict_js_1 = __nccwpck_require__(5187);
 async function run() {
     const inputs = (0, inputs_js_1.readInputs)();
@@ -34267,12 +34282,51 @@ async function run() {
         if (inputs.summary) {
             await (0, summary_js_1.writeSummary)(verdict, revisions.baseSha, revisions.headSha, installed.version, inputs.detail);
         }
+        if (inputs.prComment) {
+            await commentOnPullRequest(inputs, verdict, result.exitCode, payload, revisions, installed.version);
+        }
         if ((0, verdict_js_1.jobFailed)(verdict, result.exitCode)) {
             core.setFailed(failureMessage(verdict, result.exitCode));
         }
     }
     finally {
         await (0, git_js_1.removeWorktree)(headRoot, baseRoot);
+    }
+}
+// The pull request comment. Never allowed to change the job's outcome: a token that
+// cannot write (every pull request from a fork gets a read-only one) is a warning, and
+// the job passes or fails on the verdict exactly as it would without the comment.
+async function commentOnPullRequest(inputs, verdict, exitCode, payload, revisions, version) {
+    const issueNumber = payload.pull_request?.number;
+    if (!issueNumber) {
+        core.info(`pr-comment: not a pull request event (${revisions.eventName || "unknown"}), so no comment.`);
+        return;
+    }
+    const repository = process.env.GITHUB_REPOSITORY;
+    if (!repository || !inputs.token) {
+        core.warning("pr-comment: GITHUB_REPOSITORY or the token is missing, so no comment was posted.");
+        return;
+    }
+    const server = process.env.GITHUB_SERVER_URL || "https://github.com";
+    const runId = process.env.GITHUB_RUN_ID;
+    const ctx = {
+        marker: (0, comment_js_1.commentMarker)(inputs.prCommentKey || inputs.workingDirectory),
+        baseSha: revisions.baseSha,
+        headSha: revisions.headSha,
+        version,
+        runUrl: runId ? `${server}/${repository}/actions/runs/${runId}` : undefined,
+    };
+    const earned = (0, comment_js_1.shouldComment)(inputs.prCommentWhen, verdict, exitCode);
+    try {
+        const result = await (0, github_js_1.upsertComment)({ apiUrl: process.env.GITHUB_API_URL || "https://api.github.com", token: inputs.token, repository, issueNumber }, ctx.marker, earned ? (0, comment_js_1.renderComment)(verdict, ctx) : (0, comment_js_1.renderResolvedComment)(ctx), earned);
+        if (result.url)
+            core.setOutput("comment-url", result.url);
+        core.info(result.action === "skipped"
+            ? `pr-comment: nothing to report under pr-comment-when: ${inputs.prCommentWhen}.`
+            : `pr-comment: ${result.action} ${result.url}`);
+    }
+    catch (error) {
+        core.warning(`pr-comment: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 // Why the job is red, in the words of the status that made it red. A partial regression
@@ -34392,6 +34446,69 @@ async function removeWorktree(repo, target) {
 async function commitAuthor(repo, sha) {
     const result = await (0, exec_js_1.capture)("git", ["log", "-1", "--format=%an", sha], repo, true);
     return result.exitCode === 0 ? result.stdout.trim() || undefined : undefined;
+}
+
+
+/***/ }),
+
+/***/ 5952:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+// The pull request comment, over the REST API. Plain fetch, like the release lookup, so
+// the bundle takes on no client library for four requests.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.upsertComment = upsertComment;
+const TIMEOUT_MS = 15_000;
+const PAGE_SIZE = 100;
+async function request(target, method, path, body) {
+    const response = await fetch(`${target.apiUrl.replace(/\/$/, "")}${path}`, {
+        method,
+        headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${target.token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+            ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) {
+        const hint = response.status === 403 || response.status === 404
+            ? " The token cannot write to this pull request: grant `pull-requests: write`. A pull request from a fork gets a read-only token."
+            : "";
+        throw new Error(`GitHub API ${method} ${path} returned HTTP ${response.status}.${hint}`);
+    }
+    return response.status === 204 ? undefined : response.json();
+}
+async function findComment(target, marker) {
+    const base = `/repos/${target.repository}/issues/${target.issueNumber}/comments`;
+    for (let page = 1;; page++) {
+        const comments = (await request(target, "GET", `${base}?per_page=${PAGE_SIZE}&page=${page}`));
+        const found = comments.find((comment) => comment.body?.startsWith(marker));
+        if (found)
+            return found;
+        if (comments.length < PAGE_SIZE)
+            return undefined;
+    }
+}
+// Edits the comment carrying the marker, or creates one when create is set. A run that
+// does not earn a comment still edits an existing one, so it never goes stale.
+async function upsertComment(target, marker, body, create) {
+    const existing = await findComment(target, marker);
+    if (existing) {
+        const updated = (await request(target, "PATCH", `/repos/${target.repository}/issues/comments/${existing.id}`, {
+            body,
+        }));
+        return { action: "updated", url: updated.html_url };
+    }
+    if (!create)
+        return { action: "skipped" };
+    const created = (await request(target, "POST", `/repos/${target.repository}/issues/${target.issueNumber}/comments`, {
+        body,
+    }));
+    return { action: "created", url: created.html_url };
 }
 
 
@@ -34597,8 +34714,10 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.readInputs = readInputs;
+exports.commentWhen = commentWhen;
 exports.checkArguments = checkArguments;
 const core = __importStar(__nccwpck_require__(7484));
+const types_js_1 = __nccwpck_require__(3054);
 function optional(name) {
     return core.getInput(name).trim() || undefined;
 }
@@ -34622,9 +34741,19 @@ function readInputs() {
         annotations: core.getBooleanInput("annotations"),
         sarif: core.getBooleanInput("sarif"),
         summary: core.getBooleanInput("summary"),
+        prComment: core.getBooleanInput("pr-comment"),
+        prCommentWhen: commentWhen(core.getInput("pr-comment-when")),
+        prCommentKey: optional("pr-comment-key"),
         workingDirectory: core.getInput("working-directory").trim() || ".",
         token: optional("token"),
     };
+}
+function commentWhen(raw) {
+    const value = raw.trim() || "auto";
+    if (!types_js_1.COMMENT_WHEN.includes(value)) {
+        throw new Error(`pr-comment-when must be one of ${types_js_1.COMMENT_WHEN.join(", ")}; got "${value}".`);
+    }
+    return value;
 }
 // The `enola check` invocation. One run, one format: the JSON verdict, which is what the
 // outputs, the summary, the annotations and the SARIF file are all rendered from.
@@ -34918,6 +35047,100 @@ function annotate(verdict, root) {
     if (verdict.status === "incomparable") {
         core.error(`Enola refused to grade this change: ${(verdict.comparability_warnings || []).join("; ") || "snapshots are not comparable"}`);
     }
+}
+
+
+/***/ }),
+
+/***/ 4231:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.COMMENT_LIMIT = void 0;
+exports.commentMarker = commentMarker;
+exports.shouldComment = shouldComment;
+exports.renderComment = renderComment;
+exports.renderResolvedComment = renderResolvedComment;
+exports.neutralizeMentions = neutralizeMentions;
+const verdict_js_1 = __nccwpck_require__(5187);
+const summary_js_1 = __nccwpck_require__(7994);
+// GitHub rejects a comment body over 65,536 characters. The margin is for the marker,
+// the footer and the truncation note.
+exports.COMMENT_LIMIT = 60_000;
+// The marker that finds this step's comment again on the next push. Keyed, so two steps
+// grading two directories of one repository each keep a comment of their own.
+function commentMarker(key) {
+    return `<!-- enola-action:${key.replace(/[^\w./-]/g, "_")} -->`;
+}
+// Whether this run earns a comment. `auto` follows the policy Enola reports it enforced,
+// not the inputs: a run that could fail nothing is being evaluated and comments every
+// time; one that enforces something comments only when it fails. An Enola too old to
+// report its policy counts as enforcing, so it comments only when the job fails.
+//
+// A failed job earns one in every mode. That is what lets the replacement for a comment
+// that was not earned say "passing" without ever being wrong: an incomparable run fails
+// with no finding at all, and must not overwrite a comment with good news.
+function shouldComment(when, verdict, exitCode) {
+    if ((0, verdict_js_1.jobFailed)(verdict, exitCode))
+        return true;
+    const mode = when === "auto" ? ((0, verdict_js_1.enforcesNothing)(verdict) ? "always" : "failure") : when;
+    if (mode === "always")
+        return true;
+    if (mode === "findings") {
+        return (verdict.failures || []).length + (verdict.advisories || []).length + (verdict.breaches || []).length > 0;
+    }
+    return false;
+}
+function footer(ctx) {
+    return ctx.runUrl ? `Full report: [workflow run](${ctx.runUrl}).\n` : "";
+}
+function details(title, markdown) {
+    // The blank line before </details> ends a table the section closes on; without it
+    // GitHub can read the closing tag as another row.
+    return markdown ? `<details><summary>${title}</summary>\n\n${markdown.trimEnd()}\n\n</details>\n\n` : "";
+}
+// The comment: what the job summary leads with, in full, and the rest folded away. It
+// never carries the full delta, which is what the job summary is for.
+function renderComment(verdict, ctx) {
+    const head = `${ctx.marker}\n${(0, summary_js_1.headerMarkdown)(verdict, ctx.baseSha, ctx.headSha, ctx.version)}${(0, summary_js_1.gradedSections)(verdict)}`;
+    const folded = [
+        details("Other findings", (0, summary_js_1.otherFindingSections)(verdict)),
+        details("Guidance", (0, summary_js_1.guidanceMarkdown)(verdict.guidance)),
+        details("Reviewers", (0, summary_js_1.reviewersMarkdown)(verdict.reviewers)),
+        details("Comparability", (0, summary_js_1.comparabilityMarkdown)(verdict)),
+        details("Architectural change", (0, summary_js_1.deltaMarkdown)(verdict, false)),
+    ].filter(Boolean);
+    const tail = footer(ctx);
+    // Folded sections go first, last to first, so what the reader needs most is what stays.
+    let dropped = 0;
+    while (folded.length && head.length + folded.join("").length + tail.length > exports.COMMENT_LIMIT) {
+        folded.pop();
+        dropped++;
+    }
+    let body = head + folded.join("");
+    if (body.length + tail.length > exports.COMMENT_LIMIT) {
+        body = `${body.slice(0, exports.COMMENT_LIMIT - tail.length - 200)}\n\n`;
+        dropped++;
+    }
+    if (dropped)
+        body += "_Shortened to fit a pull request comment; the workflow run has the complete report._\n\n";
+    return neutralizeMentions(body + tail);
+}
+// What replaces a comment the current run does not earn, so a failure fixed by a later
+// push does not keep saying the pull request fails.
+function renderResolvedComment(ctx) {
+    return `${ctx.marker}\n✅ **Enola architecture check: passing** as of \`${(0, summary_js_1.short)(ctx.headSha)}\` ` +
+        `(base \`${(0, summary_js_1.short)(ctx.baseSha)}\`).\n\n${footer(ctx)}`;
+}
+// A name in a finding, a path or a git author must not notify anybody. Code spans are
+// left alone: GitHub never resolves a mention inside one.
+function neutralizeMentions(markdown) {
+    return markdown
+        .split(/(`[^`\n]*`)/)
+        .map((part, i) => (i % 2 === 1 ? part : part.replace(/(^|[^\w`])@(?=[A-Za-z0-9])/g, "$1@​")))
+        .join("");
 }
 
 
@@ -35265,12 +35488,20 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.short = short;
 exports.lawLine = lawLine;
 exports.censusLine = censusLine;
 exports.intersectionLines = intersectionLines;
 exports.logVerdict = logVerdict;
 exports.guidanceMarkdown = guidanceMarkdown;
 exports.reviewersMarkdown = reviewersMarkdown;
+exports.headlineOf = headlineOf;
+exports.gradedSections = gradedSections;
+exports.otherFindingSections = otherFindingSections;
+exports.deltaMarkdown = deltaMarkdown;
+exports.headerMarkdown = headerMarkdown;
+exports.comparabilityMarkdown = comparabilityMarkdown;
+exports.renderSummary = renderSummary;
 exports.writeSummary = writeSummary;
 const core = __importStar(__nccwpck_require__(7484));
 const verdict_js_1 = __nccwpck_require__(5187);
@@ -35611,6 +35842,11 @@ function headlineOf(verdict) {
 // failed, why the job is red, what was merely reported, and then the four kinds of
 // finding Enola deliberately refuses to fold into any of those.
 function findingSections(verdict) {
+    return gradedSections(verdict) + otherFindingSections(verdict);
+}
+// What failed, why the job is red, and what was reported against the policy. The pull
+// request comment shows these in full and folds everything after them away.
+function gradedSections(verdict) {
     const unenforced = (0, verdict_js_1.enforcesNothing)(verdict);
     const advisories = verdict.advisories || [];
     const breaches = verdict.breaches || [];
@@ -35624,6 +35860,11 @@ function findingSections(verdict) {
     if (advisories.length) {
         markdown += `## ${unenforced ? "Findings (reported, not enforced)" : "Advisory findings"}\n\n${findingList(advisories)}\n\n`;
     }
+    return markdown;
+}
+// The buckets Enola keeps out of both failures and advisories.
+function otherFindingSections(verdict) {
+    let markdown = "";
     // A rule that arrived with this change, over code the change did not touch. Its own
     // section because folding it into advisories would report "this change introduced
     // 3,980 findings" about a pull request that introduced one declaration.
@@ -35677,7 +35918,10 @@ function deltaMarkdown(verdict, detail) {
     }
     return markdown;
 }
-async function writeSummary(verdict, baseSha, headSha, version, detail = false) {
+// The headline, the revisions, and the notes that qualify everything under them. Shared
+// by the job summary and the pull request comment, so the two never disagree about what
+// the run was.
+function headerMarkdown(verdict, baseSha, headSha, version) {
     const { icon, title } = headlineOf(verdict);
     let markdown = `# Enola architecture check\n\n${icon} **${title}**\n\n`;
     markdown += `| Base | Current | Enola |\n|---|---|---|\n| \`${short(baseSha)}\` | \`${short(headSha)}\` | \`${version}\` |\n\n`;
@@ -35694,14 +35938,24 @@ async function writeSummary(verdict, baseSha, headSha, version, detail = false) 
         markdown += "> **No policy set.** Nothing in this run could fail the job — every finding below is a " +
             "report. Set `fail-on` (e.g. `fail-on: layers`) or `max-spillover` to make this a gate.\n\n";
     }
+    return markdown;
+}
+function comparabilityMarkdown(verdict) {
+    if (!verdict.comparability_warnings?.length)
+        return "";
+    return `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
+}
+function renderSummary(verdict, baseSha, headSha, version, detail = false) {
+    let markdown = headerMarkdown(verdict, baseSha, headSha, version);
     markdown += findingSections(verdict);
     markdown += guidanceMarkdown(verdict.guidance);
     markdown += reviewersMarkdown(verdict.reviewers);
-    if (verdict.comparability_warnings?.length) {
-        markdown += `## Comparability\n\n${verdict.comparability_warnings.map((warning) => `- ${warning}`).join("\n")}\n\n`;
-    }
+    markdown += comparabilityMarkdown(verdict);
     markdown += deltaMarkdown(verdict, detail);
-    await core.summary.addRaw(markdown).write();
+    return markdown;
+}
+async function writeSummary(verdict, baseSha, headSha, version, detail = false) {
+    await core.summary.addRaw(renderSummary(verdict, baseSha, headSha, version, detail)).write();
 }
 
 

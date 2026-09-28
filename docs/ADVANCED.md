@@ -2,7 +2,7 @@
 
 ## Outputs
 
-`status`, `partial`, `regressions`, `advisories`, `facts-added`, `facts-removed`, `edges-added`, `edges-removed`, `ungraded-facts`, `ungraded-findings`, `sarif-file`, and `verdict-file`: the path to the complete JSON verdict, which carries more than the others summarise.
+`status`, `partial`, `regressions`, `advisories`, `facts-added`, `facts-removed`, `edges-added`, `edges-removed`, `ungraded-facts`, `ungraded-findings`, `sarif-file`, `comment-url` (with `pr-comment`, the comment it created or updated), and `verdict-file`: the path to the complete JSON verdict, which carries more than the others summarise.
 
 `status` is `clean`, `regression`, `usage_error`, `incomparable`, or one of the two **partial** forms, see [PARTIAL-VERDICTS.md](PARTIAL-VERDICTS.md).
 
