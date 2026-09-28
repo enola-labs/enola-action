@@ -10,6 +10,7 @@ import {
   reviewersMarkdown,
   short,
 } from "./summary.js";
+import { packageMetricsMarkdown } from "./packagemetrics.js";
 
 // GitHub rejects a comment body over 65,536 characters. The margin is for the marker,
 // the footer and the truncation note.
@@ -66,6 +67,7 @@ export function renderComment(verdict: Verdict, ctx: CommentContext): string {
     details("Guidance", guidanceMarkdown(verdict.guidance)),
     details("Reviewers", reviewersMarkdown(verdict.reviewers)),
     details("Comparability", comparabilityMarkdown(verdict)),
+    details("Package metrics", packageMetricsMarkdown(verdict.package_metrics)),
     details("Architectural change", deltaMarkdown(verdict, false)),
   ].filter(Boolean);
   const tail = footer(ctx);

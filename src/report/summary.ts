@@ -9,6 +9,7 @@ import {
   ungradedFindings,
 } from "../policy/verdict.js";
 import { buckets, placeOf, plural, ruleOf } from "./findings.js";
+import { packageMetricsMarkdown } from "./packagemetrics.js";
 
 // How many entries any one section prints. The rest are counted, never dropped in
 // silence: a rule declared over an existing codebase can produce thousands of findings
@@ -456,6 +457,7 @@ export function renderSummary(verdict: Verdict, baseSha: string, headSha: string
   markdown += guidanceMarkdown(verdict.guidance);
   markdown += reviewersMarkdown(verdict.reviewers);
   markdown += comparabilityMarkdown(verdict);
+  markdown += packageMetricsMarkdown(verdict.package_metrics, detail);
   markdown += deltaMarkdown(verdict, detail);
   return markdown;
 }
