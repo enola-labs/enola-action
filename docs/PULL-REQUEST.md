@@ -10,9 +10,9 @@ A failing run, with `fail-on: layers`. The job summary, verbatim:
 >
 > ❌ **1 structural regression(s) introduced**
 >
-> | Base       | Current    | Enola   |
-> | ---------- | ---------- | ------- |
-> | `9f2c1ab4` | `3b7e5c2a` | `0.4.5` |
+> | Base       | Current    | Enola    |
+> | ---------- | ---------- | -------- |
+> | `9f2c1ab4` | `3b7e5c2a` | `0.4.30` |
 >
 > _could not see: 0 files and 1 directory excluded by ignore globs; 2 imports targets outside the graph_
 >
