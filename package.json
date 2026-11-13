@@ -11,18 +11,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@actions/core": "^2.0.3",
-    "@actions/exec": "^2.0.0",
-    "@actions/tool-cache": "^3.0.1"
+    "@actions/core": "^3.0.1",
+    "@actions/exec": "^3.0.0",
+    "@actions/tool-cache": "^4.0.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
-    "@vercel/ncc": "^0.38.3",
+    "@types/node": "^24.19.2",
+    "@vercel/ncc": "^0.44.1",
     "prettier": "^3.4.2",
-    "typescript": "^5.7.2",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "type": "module"
 }

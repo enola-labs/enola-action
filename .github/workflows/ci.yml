@@ -22,8 +22,8 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Verify committed bundle
-        run: git diff --exit-code -- dist/index.js
-      # The diff above only proves dist/index.js matches src. It cannot see a file the
+        run: test -z "$(git status --porcelain -- dist)" || { git status --porcelain -- dist; git diff -- dist; exit 1; }
+      # The check above only proves dist/ matches src. It cannot see a file the
       # bundle requires at runtime but .gitignore keeps out of the repo, which is how a
       # release shipped that failed with MODULE_NOT_FOUND on every consumer's runner.
       # Loading the bundle the way a runner does is what catches that.
