@@ -20,7 +20,7 @@
     "@vercel/ncc": "^0.44.1",
     "prettier": "^3.4.2",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^5.1.0"
   },
   "engines": {
     "node": ">=20"
